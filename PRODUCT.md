@@ -86,6 +86,7 @@ No public inbound ports are required for normal usage.
 - Configurable scheduled task limit (default: 10)
 - Configurable bot locale
 - Configurable visibility for service messages (thinking/tool calls)
+- Configurable visibility for assistant run footer messages
 - Configurable max code file size in KB (default: 100)
 - Optional STT settings for voice transcription (`STT_API_URL`, `STT_API_KEY`, `STT_MODEL`, `STT_LANGUAGE`)
 - Optional TTS settings for global audio replies (`TTS_API_URL`, `TTS_API_KEY`, `TTS_MODEL`, `TTS_VOICE`)
@@ -150,6 +151,7 @@ Model picker behavior:
 - [x] Persistent settings between restarts (`settings.json`)
 - [x] UI localization support via i18n files
 - [x] Service message visibility controls (thinking/tool updates)
+- [x] Assistant run footer visibility control
 - [x] Sending code blocks as text files when needed
 - [x] Image attachments support (send photos/screenshots from Telegram to OpenCode)
 - [x] PDF attachments support (send documents from Telegram to OpenCode)

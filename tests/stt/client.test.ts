@@ -36,6 +36,7 @@ vi.mock("../../src/config.js", () => ({
       projectsListLimit: 10,
       locale: "en",
       hideThinkingMessages: false,
+      hideAssistantRunFooter: false,
       hideToolCallMessages: false,
     },
     files: { maxFileSizeKb: 100 },

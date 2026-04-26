@@ -53,6 +53,7 @@ vi.mock("../../../src/config.js", () => ({
       sessionsListLimit: 10,
       projectsListLimit: 10,
       hideThinkingMessages: false,
+      hideAssistantRunFooter: false,
       hideToolCallMessages: false,
       messageFormatMode: "markdown",
     },

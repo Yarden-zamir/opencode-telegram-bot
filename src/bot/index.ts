@@ -818,7 +818,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         toolCallStreamer.flushSession(sessionId, "session_idle"),
       ]);
 
-      if (completedRun?.hasCompletedResponse) {
+      if (completedRun?.hasCompletedResponse && !config.bot.hideAssistantRunFooter) {
         const agent = completedRun.actualAgent || completedRun.configuredAgent;
         const providerID = completedRun.actualProviderID || completedRun.configuredProviderID;
         const modelID = completedRun.actualModelID || completedRun.configuredModelID;

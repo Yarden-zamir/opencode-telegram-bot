@@ -100,6 +100,7 @@ import {
   renderAssistantFinalPartsSafe,
 } from "./utils/assistant-rendering.js";
 import { deliverExternalUserInputNotification } from "./utils/external-user-input.js";
+import { clearWrapperToolTelegramContext } from "../wrapper-tools/server.js";
 
 let botInstance: Bot<Context> | null = null;
 let chatIdInstance: number | null = null;
@@ -1361,6 +1362,7 @@ export function cleanupBotRuntime(reason: string): void {
   toolMessageBatcher.clearAll(reason);
   sessionCompletionTasks.clear();
   assistantRunState.clearAll(reason);
+  clearWrapperToolTelegramContext();
 
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);

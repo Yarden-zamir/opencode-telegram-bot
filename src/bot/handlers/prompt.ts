@@ -27,6 +27,7 @@ import {
   markAttachedSessionIdle,
 } from "../../attach/service.js";
 import { externalUserInputSuppressionManager } from "../../external-input/suppression.js";
+import { setWrapperToolTelegramContext } from "../../wrapper-tools/server.js";
 
 /** Module-level references for async callbacks that don't have ctx. */
 let botInstance: Bot<Context> | null = null;
@@ -187,6 +188,7 @@ export async function processUserPrompt(
     session: currentSession,
     ensureEventSubscription,
   });
+  setWrapperToolTelegramContext({ bot, chatId: ctx.chat!.id, sessionId: currentSession.id });
 
   if (createdNewSession) {
     const currentAgent = await resolveProjectAgent(getStoredAgent());

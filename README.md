@@ -161,6 +161,17 @@ Scheduled tasks let you prepare prompts in advance and run them automatically la
 - By default, the bot waits up to 120 minutes for one scheduled task run; change this with `SCHEDULED_TASK_EXECUTION_TIMEOUT_MINUTES` if needed
 - Up to 10 scheduled tasks can exist at once by default; change this with `TASK_LIMIT` in your `.env`
 
+## OpenCode Telegram Tools
+
+On startup, the bot installs OpenCode custom tools into `~/.config/opencode/tools/opencode_telegram_bot.ts` and exposes a local authenticated loopback endpoint for them. These tools are available to the current OpenCode session after OpenCode loads custom tools.
+
+- `opencode_telegram_bot_notify` sends a Telegram message to the current chat
+- `opencode_telegram_bot_scheduler_create_task` creates a scheduled task using the current Telegram-selected project and model
+- `opencode_telegram_bot_scheduler_list_tasks` lists scheduled tasks
+- `opencode_telegram_bot_scheduler_delete_task` deletes a scheduled task by id
+
+If OpenCode was already running before the bot started, restart OpenCode once so it picks up the generated custom tool file.
+
 ## Track Existing Session
 
 After you create a new session, select an existing one, or let the bot auto-create one from your first prompt, the bot automatically starts tracking that session. It follows live events from the same OpenCode CLI session, shows external text input sent from another TUI client, and lets you continue the same session from Telegram.

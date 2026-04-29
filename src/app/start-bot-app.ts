@@ -13,6 +13,7 @@ import { getRuntimePaths } from "../runtime/paths.js";
 import { clearServiceStateFile } from "../service/manager.js";
 import { getServiceStateFilePathFromEnv, isServiceChildProcess } from "../service/runtime.js";
 import { getLogFilePath, initializeLogger, logger } from "../utils/logger.js";
+import { wrapperToolServer } from "../wrapper-tools/server.js";
 
 const SHUTDOWN_TIMEOUT_MS = 5000;
 
@@ -47,6 +48,9 @@ export async function startBotApp(): Promise<void> {
 
   await loadSettings();
   await reconcileStoredModelSelection();
+  await wrapperToolServer.start().catch((error) => {
+    logger.warn("[WrapperTools] Failed to start OpenCode Telegram tools", error);
+  });
   await opencodeAutoRestartService.start();
   await warmupSessionDirectoryCache();
 
@@ -92,6 +96,7 @@ export async function startBotApp(): Promise<void> {
     cleanupBotRuntime(`app_shutdown_${signal.toLowerCase()}`);
     opencodeAutoRestartService.stop();
     scheduledTaskRuntime.shutdown();
+    void wrapperToolServer.stop();
 
     shutdownTimeout = setTimeout(() => {
       logger.warn(`[App] Shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS}ms, forcing exit.`);
@@ -138,6 +143,7 @@ export async function startBotApp(): Promise<void> {
     cleanupBotRuntime("app_shutdown_complete");
     opencodeAutoRestartService.stop();
     scheduledTaskRuntime.shutdown();
+    await wrapperToolServer.stop();
     await clearManagedServiceState().catch((error) => {
       logger.warn("[App] Failed to clear managed service state", error);
     });

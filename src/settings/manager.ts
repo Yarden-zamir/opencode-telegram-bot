@@ -347,6 +347,10 @@ export function getScopedSessions(): Record<string, SessionInfo> {
   return cloneRecord(currentSettings.scopedSessions, cloneSessionInfo) ?? {};
 }
 
+export function getScopedProjects(): Record<string, ProjectInfo> {
+  return cloneRecord(currentSettings.scopedProjects, cloneProjectInfo) ?? {};
+}
+
 export function getTopicSessionBindings(): Record<string, TopicSessionBinding> {
   return cloneRecord(currentSettings.topicSessionBindings, cloneTopicSessionBinding) ?? {};
 }

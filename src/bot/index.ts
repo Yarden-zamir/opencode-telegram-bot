@@ -85,7 +85,7 @@ import {
 import { handleVoiceMessage } from "./handlers/voice.js";
 import { handleDocumentMessage } from "./handlers/document.js";
 import { handlePhotoMessage } from "./handlers/photo.js";
-import { handleForumTopicCreated } from "./handlers/forum-topic.js";
+import { handleForumTopicClosed, handleForumTopicCreated } from "./handlers/forum-topic.js";
 import { reconcileBusyState } from "./utils/busy-reconciliation.js";
 import { finalizeAssistantResponse } from "./utils/finalize-assistant-response.js";
 import { sendTtsResponseForSession } from "./utils/send-tts-response.js";
@@ -1242,6 +1242,12 @@ export function createBot(): Bot<Context> {
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     await handleForumTopicCreated(ctx, { bot, ensureEventSubscription });
+  });
+
+  bot.on("message:forum_topic_closed", async (ctx) => {
+    botInstance = bot;
+    chatIdInstance = ctx.chat.id;
+    await handleForumTopicClosed(ctx, { bot });
   });
 
   bot.on("message:text", unknownCommandMiddleware);

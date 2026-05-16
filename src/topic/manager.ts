@@ -195,7 +195,7 @@ export function removeTopicBinding(chatId: number, threadId: number): void {
 export function getSessionRouteTarget(sessionId: string): SessionRouteTarget | null {
   ensureTopicBindingsHydrated();
   const binding = findTopicSessionBindingBySessionId(sessionId);
-  if (binding) {
+  if (binding && binding.status === TOPIC_SESSION_STATUS.ACTIVE) {
     return {
       scopeKey: binding.scopeKey,
       chatId: binding.chatId,

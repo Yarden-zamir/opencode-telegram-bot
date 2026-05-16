@@ -132,6 +132,7 @@ describe("topic/manager", () => {
       topicName: "Renamed topic",
       closedAt: expect.any(Number),
     });
+    expect(getSessionRouteTarget("session-1")).toBeNull();
   });
 
   it("sets closedAt when marking a binding stale", () => {

@@ -1,17 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Context } from "grammy";
-import { handleForumTopicCreated } from "../../../src/bot/handlers/forum-topic.js";
+import {
+  handleForumTopicClosed,
+  handleForumTopicCreated,
+} from "../../../src/bot/handlers/forum-topic.js";
 import { t } from "../../../src/i18n/index.js";
 
 const mocked = vi.hoisted(() => ({
   sessionCreateMock: vi.fn(),
+  sessionAbortMock: vi.fn(),
+  sessionDeleteMock: vi.fn(),
   getCurrentProjectMock: vi.fn(),
   setCurrentProjectMock: vi.fn(),
   setCurrentAgentMock: vi.fn(),
   setCurrentModelMock: vi.fn(),
   setCurrentSessionMock: vi.fn(),
+  clearSessionMock: vi.fn(),
   getTopicBindingByScopeKeyMock: vi.fn(),
   registerTopicSessionBindingMock: vi.fn(),
+  updateTopicBindingStatusMock: vi.fn(),
   attachToSessionMock: vi.fn(),
   ensureEventSubscriptionMock: vi.fn(),
   ingestSessionInfoForCacheMock: vi.fn(),
@@ -22,6 +29,8 @@ vi.mock("../../../src/opencode/client.js", () => ({
   opencodeClient: {
     session: {
       create: mocked.sessionCreateMock,
+      abort: mocked.sessionAbortMock,
+      delete: mocked.sessionDeleteMock,
     },
   },
 }));
@@ -42,6 +51,7 @@ vi.mock("../../../src/settings/manager.js", () => ({
 
 vi.mock("../../../src/session/manager.js", () => ({
   setCurrentSession: mocked.setCurrentSessionMock,
+  clearSession: mocked.clearSessionMock,
 }));
 
 vi.mock("../../../src/session/cache-manager.js", () => ({
@@ -56,6 +66,7 @@ vi.mock("../../../src/interaction/cleanup.js", () => ({
 vi.mock("../../../src/topic/manager.js", () => ({
   getTopicBindingByScopeKey: mocked.getTopicBindingByScopeKeyMock,
   registerTopicSessionBinding: mocked.registerTopicSessionBindingMock,
+  updateTopicBindingStatus: mocked.updateTopicBindingStatusMock,
 }));
 
 vi.mock("../../../src/attach/service.js", () => ({
@@ -100,6 +111,19 @@ function createForumTopicContext(options: { fromBot?: boolean; isForum?: boolean
   } as unknown as Context;
 }
 
+function createForumTopicClosedContext(): Context {
+  return {
+    chat: { id: -100123, type: "supergroup", is_forum: true },
+    from: { id: 123, is_bot: false },
+    message: {
+      message_id: 10,
+      message_thread_id: 42,
+      is_topic_message: true,
+      forum_topic_closed: {},
+    },
+  } as unknown as Context;
+}
+
 function createDeps() {
   return {
     bot: { api: {} } as Bot<Context>,
@@ -110,13 +134,17 @@ function createDeps() {
 describe("bot/handlers/forum-topic", () => {
   beforeEach(() => {
     mocked.sessionCreateMock.mockReset();
+    mocked.sessionAbortMock.mockReset();
+    mocked.sessionDeleteMock.mockReset();
     mocked.getCurrentProjectMock.mockReset();
     mocked.setCurrentProjectMock.mockReset();
     mocked.setCurrentAgentMock.mockReset();
     mocked.setCurrentModelMock.mockReset();
     mocked.setCurrentSessionMock.mockReset();
+    mocked.clearSessionMock.mockReset();
     mocked.getTopicBindingByScopeKeyMock.mockReset();
     mocked.registerTopicSessionBindingMock.mockReset();
+    mocked.updateTopicBindingStatusMock.mockReset();
     mocked.attachToSessionMock.mockReset();
     mocked.ensureEventSubscriptionMock.mockReset();
     mocked.ingestSessionInfoForCacheMock.mockReset();
@@ -129,6 +157,8 @@ describe("bot/handlers/forum-topic", () => {
       restoredQuestion: false,
       restoredPermissions: 0,
     });
+    mocked.sessionAbortMock.mockResolvedValue({ data: true, error: null });
+    mocked.sessionDeleteMock.mockResolvedValue({ data: true, error: null });
   });
 
   it("creates and binds a session when an authorized user manually creates a topic", async () => {
@@ -203,5 +233,34 @@ describe("bot/handlers/forum-topic", () => {
 
     expect(handled).toBe(false);
     expect(mocked.sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("closes the bound session when a forum topic is closed", async () => {
+    mocked.getTopicBindingByScopeKeyMock.mockReturnValue({
+      scopeKey: "-100123:42",
+      chatId: -100123,
+      threadId: 42,
+      sessionId: "session-1",
+      projectId: "project-1",
+      projectWorktree: "/repo",
+      status: "active",
+    });
+
+    const handled = await handleForumTopicClosed(createForumTopicClosedContext(), {
+      bot: { api: {} } as Bot<Context>,
+    });
+
+    expect(handled).toBe(true);
+    expect(mocked.updateTopicBindingStatusMock).toHaveBeenCalledWith(-100123, 42, "closed");
+    expect(mocked.clearSessionMock).toHaveBeenCalledWith("-100123:42");
+    expect(mocked.clearAllInteractionStateMock).toHaveBeenCalledWith(
+      "forum_topic_closed",
+      "-100123:42",
+    );
+    expect(mocked.sessionAbortMock).toHaveBeenCalledWith({
+      sessionID: "session-1",
+      directory: "/repo",
+    });
+    expect(mocked.sessionDeleteMock).toHaveBeenCalledWith({ sessionID: "session-1" });
   });
 });

@@ -272,7 +272,7 @@ describe("bot/commands/ls", () => {
     expect(mocked.sendDownloadedFileMock).toHaveBeenCalledWith(callbackCtx, "/repo/project/README.md", {
       announce: false,
     });
-    expect(mocked.clearActiveInlineMenuMock).toHaveBeenCalledWith("ls_downloaded");
+    expect(mocked.clearActiveInlineMenuMock).toHaveBeenCalledWith("ls_downloaded", callbackCtx);
     expect(callbackCtx.deleteMessage).toHaveBeenCalled();
   });
 

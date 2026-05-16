@@ -6,7 +6,7 @@ import { getStoredModel } from "../../model/manager.js";
 import { opencodeClient } from "../../opencode/client.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
 import type { SessionInfo } from "../../session/manager.js";
-import { setCurrentSession } from "../../session/manager.js";
+import { clearSession, setCurrentSession } from "../../session/manager.js";
 import {
   TOPIC_SESSION_STATUS,
   getCurrentProject,
@@ -15,7 +15,11 @@ import {
   setCurrentProject,
   type ProjectInfo,
 } from "../../settings/manager.js";
-import { registerTopicSessionBinding, getTopicBindingByScopeKey } from "../../topic/manager.js";
+import {
+  getTopicBindingByScopeKey,
+  registerTopicSessionBinding,
+  updateTopicBindingStatus,
+} from "../../topic/manager.js";
 import { formatTopicTitle } from "../../topic/title-format.js";
 import { formatVariantForButton } from "../../variant/manager.js";
 import { attachToSession } from "../../attach/service.js";
@@ -35,6 +39,10 @@ import { createMainKeyboard } from "../utils/keyboard.js";
 export interface ForumTopicCreatedDeps {
   bot: Bot<Context>;
   ensureEventSubscription: (directory: string) => Promise<void>;
+}
+
+export interface ForumTopicClosedDeps {
+  bot: Bot<Context>;
 }
 
 interface ProjectContext {
@@ -167,6 +175,66 @@ export async function handleForumTopicCreated(
   } catch (error) {
     logger.error("[Bot] Error creating session for manually created forum topic", error);
     await ctx.reply(t("new.create_error"), getThreadSendOptions(scope.threadId));
+    return true;
+  }
+}
+
+export async function handleForumTopicClosed(
+  ctx: Context,
+  _deps: ForumTopicClosedDeps,
+): Promise<boolean> {
+  if (
+    !ctx.chat ||
+    ctx.chat.type !== CHAT_TYPE.SUPERGROUP ||
+    Reflect.get(ctx.chat, TELEGRAM_CHAT_FIELD.IS_FORUM) !== true
+  ) {
+    return false;
+  }
+
+  const scope = getScopeFromContext(ctx);
+  if (!scope || !isTopicScope(scope) || scope.threadId === null) {
+    return false;
+  }
+
+  const binding = getTopicBindingByScopeKey(scope.key);
+  if (!binding) {
+    return false;
+  }
+
+  updateTopicBindingStatus(scope.chatId, scope.threadId, TOPIC_SESSION_STATUS.CLOSED);
+  clearSession(scope.key);
+  clearAllInteractionState("forum_topic_closed", scope.key);
+
+  try {
+    if (binding.projectWorktree) {
+      const { error } = await opencodeClient.session.abort({
+        sessionID: binding.sessionId,
+        directory: binding.projectWorktree,
+      });
+      if (error) {
+        logger.debug("[Bot] Session abort before topic close delete was not confirmed", {
+          sessionId: binding.sessionId,
+          error,
+        });
+      }
+    }
+
+    const { error } = await opencodeClient.session.delete({ sessionID: binding.sessionId });
+    if (error) {
+      throw error;
+    }
+
+    logger.info(
+      `[Bot] Deleted session for closed forum topic: chat=${scope.chatId}, thread=${scope.threadId}, session=${binding.sessionId}`,
+    );
+    return true;
+  } catch (error) {
+    logger.error("[Bot] Failed to delete session for closed forum topic", {
+      chatId: scope.chatId,
+      threadId: scope.threadId,
+      sessionId: binding.sessionId,
+      error,
+    });
     return true;
   }
 }

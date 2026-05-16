@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { cleanupBotRuntime, createBot } from "../bot/index.js";
 import { config } from "../config.js";
 import { opencodeAutoRestartService } from "../opencode/auto-restart.js";
+import { opencodeReadyLifecycle } from "../opencode/ready-lifecycle.js";
 import {
   notifyOpencodeReadyIfHealthy,
   registerOpenCodeReadyRefreshHandler,
@@ -18,6 +19,7 @@ import { getServiceStateFilePathFromEnv, isServiceChildProcess } from "../servic
 import { getLogFilePath, initializeLogger, logger } from "../utils/logger.js";
 import { wrapperToolServer } from "../wrapper-tools/server.js";
 import { safeBackgroundTask } from "../utils/safe-background-task.js";
+import { reconcileStoredSessionsWithForumTopics } from "../topic/startup-reconcile.js";
 
 const SHUTDOWN_TIMEOUT_MS = 5000;
 
@@ -57,6 +59,9 @@ export async function startBotApp(): Promise<void> {
   });
   registerOpenCodeReadyRefreshHandler();
   const bot = createBot();
+  const unsubscribeTopicReconcile = opencodeReadyLifecycle.onReady((reason) =>
+    reconcileStoredSessionsWithForumTopics(bot.api, reason),
+  );
   await scheduledTaskRuntime.initialize(bot);
   safeBackgroundTask({
     taskName: "app.opencodeStartup",
@@ -103,6 +108,7 @@ export async function startBotApp(): Promise<void> {
     shutdownStarted = true;
     logger.info(`[App] Received ${signal}, shutting down...`);
     cleanupBotRuntime(`app_shutdown_${signal.toLowerCase()}`);
+    unsubscribeTopicReconcile();
     opencodeAutoRestartService.stop();
     scheduledTaskRuntime.shutdown();
     void wrapperToolServer.stop();
@@ -150,6 +156,7 @@ export async function startBotApp(): Promise<void> {
       shutdownTimeout = null;
     }
     cleanupBotRuntime("app_shutdown_complete");
+    unsubscribeTopicReconcile();
     opencodeAutoRestartService.stop();
     scheduledTaskRuntime.shutdown();
     await wrapperToolServer.stop();

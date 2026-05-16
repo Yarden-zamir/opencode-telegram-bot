@@ -85,6 +85,7 @@ import {
 import { handleVoiceMessage } from "./handlers/voice.js";
 import { handleDocumentMessage } from "./handlers/document.js";
 import { handlePhotoMessage } from "./handlers/photo.js";
+import { handleForumTopicCreated } from "./handlers/forum-topic.js";
 import { reconcileBusyState } from "./utils/busy-reconciliation.js";
 import { finalizeAssistantResponse } from "./utils/finalize-assistant-response.js";
 import { sendTtsResponseForSession } from "./utils/send-tts-response.js";
@@ -1236,6 +1237,12 @@ export function createBot(): Bot<Context> {
   bot.command("commands", commandsCommand);
   bot.command("skills", skillsCommand);
   bot.command("mcps", mcpsCommand);
+
+  bot.on("message:forum_topic_created", async (ctx) => {
+    botInstance = bot;
+    chatIdInstance = ctx.chat.id;
+    await handleForumTopicCreated(ctx, { bot, ensureEventSubscription });
+  });
 
   bot.on("message:text", unknownCommandMiddleware);
 

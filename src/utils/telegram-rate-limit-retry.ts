@@ -63,6 +63,10 @@ function getRetryAfterSecondsFromError(error: unknown): number | null {
 
 function isTelegramRateLimitError(error: unknown): boolean {
   if (typeof error === "object" && error !== null) {
+    if (getRetryAfterSecondsFromError(error) !== null) {
+      return true;
+    }
+
     const status = Reflect.get(error, "status");
     if (typeof status === "number" && status === 429) {
       return true;

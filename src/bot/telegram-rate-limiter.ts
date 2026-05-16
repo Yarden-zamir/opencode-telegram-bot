@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger.js";
+import { getTelegramRetryAfterMs } from "../utils/telegram-rate-limit-retry.js";
 
 const GLOBAL_MIN_INTERVAL_MS = 40;
 const PER_CHAT_SEND_INTERVAL_MS = 1100;
@@ -91,24 +92,6 @@ function isGroupLikeChat(chatId: number | null): boolean {
   return chatId !== null && chatId < 0;
 }
 
-function getRetryAfterMs(error: unknown): number | null {
-  if (!error || typeof error !== "object") {
-    return null;
-  }
-
-  const params = Reflect.get(error, "parameters");
-  if (!params || typeof params !== "object") {
-    return null;
-  }
-
-  const retryAfter = Reflect.get(params, "retry_after");
-  if (typeof retryAfter !== "number" || retryAfter <= 0) {
-    return null;
-  }
-
-  return retryAfter * 1000;
-}
-
 function sleep(ms: number): Promise<void> {
   if (ms <= 0) {
     return Promise.resolve();
@@ -150,7 +133,7 @@ export class TelegramRateLimiter {
       try {
         return await run();
       } catch (error) {
-        const retryAfterMs = getRetryAfterMs(error);
+        const retryAfterMs = getTelegramRetryAfterMs(error);
         if (!retryAfterMs) {
           throw error;
         }
@@ -307,7 +290,7 @@ export class TelegramRateLimiter {
       }
       return "done";
     } catch (error) {
-      const retryAfterMs = getRetryAfterMs(error);
+      const retryAfterMs = getTelegramRetryAfterMs(error);
       if (!retryAfterMs) {
         for (const reject of job.rejects) {
           reject(error);

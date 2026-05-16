@@ -9,6 +9,10 @@ function createRetryAfterError(seconds: number): { parameters: { retry_after: nu
   };
 }
 
+function createGrammyRetryAfterError(seconds: number): Error {
+  return new Error(`Call to 'editMessageText' failed! (429: Too Many Requests: retry after ${seconds})`);
+}
+
 describe("bot/telegram-rate-limiter", () => {
   it("keeps in-order delivery for same scope after retry", async () => {
     vi.useFakeTimers();
@@ -184,6 +188,41 @@ describe("bot/telegram-rate-limiter", () => {
         executionOrder.push(`attempt-${attempts}`);
         if (attempts === 1) {
           throw createRetryAfterError(2);
+        }
+
+        return "ok";
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(executionOrder).toEqual(["attempt-1"]);
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    await expect(job).resolves.toBe("ok");
+    expect(executionOrder).toEqual(["attempt-1", "attempt-2"]);
+
+    vi.useRealTimers();
+  });
+
+  it("retries grammY 429 message errors even when parameters are missing", async () => {
+    vi.useFakeTimers();
+
+    const limiter = new TelegramRateLimiter();
+    const executionOrder: string[] = [];
+    let attempts = 0;
+
+    const job = limiter.enqueue(
+      "editMessageText",
+      {
+        chat_id: -1001,
+        message_thread_id: 77,
+        message_id: 10,
+      },
+      async () => {
+        attempts += 1;
+        executionOrder.push(`attempt-${attempts}`);
+        if (attempts === 1) {
+          throw createGrammyRetryAfterError(2);
         }
 
         return "ok";

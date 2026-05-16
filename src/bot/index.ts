@@ -2,8 +2,6 @@ import { Bot, Context, InputFile, NextFunction } from "grammy";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { SocksProxyAgent } from "socks-proxy-agent";
-import { HttpsProxyAgent } from "https-proxy-agent";
 import { config } from "../config.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { interactionGuardMiddleware } from "./middleware/interaction-guard.js";
@@ -17,12 +15,19 @@ import {
   MODEL_BUTTON_TEXT_PATTERN,
   VARIANT_BUTTON_TEXT_PATTERN,
 } from "./message-patterns.js";
-import { sessionsCommand, handleSessionSelect } from "./commands/sessions.js";
+import {
+  buildBackgroundSessionOpenKeyboard,
+  handleBackgroundSessionOpen,
+  handleSessionSelect,
+  sessionsCommand,
+} from "./commands/sessions.js";
 import { newCommand } from "./commands/new.js";
 import { projectsCommand, handleProjectSelect } from "./commands/projects.js";
 import { worktreeCommand, handleWorktreeCallback } from "./commands/worktree.js";
 import { openCommand, handleOpenCallback, clearOpenPathIndex } from "./commands/open.js";
+import { clearLsPathIndex, handleLsCallback, lsCommand } from "./commands/ls.js";
 import { abortCommand } from "./commands/abort.js";
+import { detachCommand } from "./commands/detach.js";
 import { opencodeStartCommand } from "./commands/opencode-start.js";
 import { opencodeStopCommand } from "./commands/opencode-stop.js";
 import { renameCommand, handleRenameCancel, handleRenameTextAnswer } from "./commands/rename.js";
@@ -56,6 +61,7 @@ import { interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
 import { keyboardManager } from "../keyboard/manager.js";
 import { stopEventListening, subscribeToEvents } from "../opencode/events.js";
+import { opencodeReadyLifecycle } from "../opencode/ready-lifecycle.js";
 import { summaryAggregator } from "../summary/aggregator.js";
 import { formatToolInfo } from "../summary/formatter.js";
 import { renderSubagentCards } from "../summary/subagent-formatter.js";
@@ -67,10 +73,13 @@ import { safeBackgroundTask } from "../utils/safe-background-task.js";
 import { withTelegramRateLimitRetry } from "../utils/telegram-rate-limit-retry.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
 import { t } from "../i18n/index.js";
+import { getCurrentProject } from "../settings/manager.js";
+import { createTelegramBotOptions } from "./telegram-client-options.js";
 import { clearPromptResponseMode, processUserPrompt } from "./handlers/prompt.js";
 import { handleVoiceMessage } from "./handlers/voice.js";
 import { handleDocumentMessage } from "./handlers/document.js";
 import { handlePhotoMessage } from "./handlers/photo.js";
+import { reconcileBusyState } from "./utils/busy-reconciliation.js";
 import { finalizeAssistantResponse } from "./utils/finalize-assistant-response.js";
 import { sendTtsResponseForSession } from "./utils/send-tts-response.js";
 import { deliverThinkingMessage } from "./utils/thinking-message.js";
@@ -101,11 +110,16 @@ import {
 } from "./utils/assistant-rendering.js";
 import { deliverExternalUserInputNotification } from "./utils/external-user-input.js";
 import { clearWrapperToolTelegramContext } from "../wrapper-tools/server.js";
+import {
+  backgroundSessionTracker,
+  type BackgroundSessionNotification,
+} from "../background-session/tracker.js";
 
 let botInstance: Bot<Context> | null = null;
 let chatIdInstance: number | null = null;
 let commandsInitialized = false;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let unsubscribeReadyRestore: (() => void) | null = null;
 
 const TELEGRAM_DOCUMENT_CAPTION_MAX_LENGTH = 1024;
 const RESPONSE_STREAM_THROTTLE_MS = config.bot.responseStreamThrottleMs;
@@ -344,6 +358,48 @@ function getToolStreamKey(tool: string): ToolStreamKey {
   return "default";
 }
 
+function formatShortSessionId(sessionId: string): string {
+  return sessionId.length <= 8 ? sessionId : sessionId.slice(0, 8);
+}
+
+function getBackgroundSessionLabel(notification: BackgroundSessionNotification): string {
+  const title = notification.sessionTitle?.trim();
+  if (title) {
+    return title;
+  }
+
+  return t("background.session_fallback", { id: formatShortSessionId(notification.sessionId) });
+}
+
+function formatBackgroundSessionNotification(notification: BackgroundSessionNotification): string {
+  const session = getBackgroundSessionLabel(notification);
+
+  switch (notification.kind) {
+    case "assistant_response":
+      return t("background.assistant_response", { session });
+    case "question_asked":
+      return t("background.question_asked", { session });
+    case "permission_asked":
+      return t("background.permission_asked", { session });
+  }
+}
+
+async function deliverBackgroundSessionNotification(
+  notification: BackgroundSessionNotification,
+): Promise<void> {
+  if (!botInstance || !chatIdInstance) {
+    return;
+  }
+
+  await botInstance.api.sendMessage(
+    chatIdInstance,
+    formatBackgroundSessionNotification(notification),
+    {
+      reply_markup: buildBackgroundSessionOpenKeyboard(notification.sessionId, notification.kind),
+    },
+  );
+}
+
 type EventStreamItem = {
   type: string;
   properties: Record<string, unknown>;
@@ -364,7 +420,8 @@ function shouldMarkAttachedBusyFromEvent(event: EventStreamItem): boolean {
     case "session.status":
       return (event.properties as { status?: { type?: string } }).status?.type === "busy";
     case "message.updated": {
-      const info = (event.properties as { info?: { role?: string; time?: { completed?: number } } }).info;
+      const info = (event.properties as { info?: { role?: string; time?: { completed?: number } } })
+        .info;
       return info?.role === "assistant" && !info.time?.completed;
     }
     case "message.part.updated":
@@ -413,6 +470,13 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   }
 
   summaryAggregator.setTypingIndicatorEnabled(true);
+  backgroundSessionTracker.setDirectory(directory);
+  backgroundSessionTracker.setOnNotification(deliverBackgroundSessionNotification);
+
+  if (!config.bot.trackBackgroundSessions) {
+    backgroundSessionTracker.clear();
+  }
+
   summaryAggregator.setOnCleared(() => {
     toolMessageBatcher.clearAll("summary_aggregator_clear");
     toolCallStreamer.clearAll("summary_aggregator_clear");
@@ -940,9 +1004,17 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
   logger.info(`[Bot] Subscribing to OpenCode events for project: ${directory}`);
   subscribeToEvents(directory, (event) => {
+    if ((event as EventStreamItem).type === "server.heartbeat") {
+      void reconcileBusyState(directory);
+    }
+
     const attached = attachManager.getSnapshot();
     const eventSessionId = getEventSessionId(event);
-    if (attached && eventSessionId === attached.sessionId && shouldMarkAttachedBusyFromEvent(event)) {
+    if (
+      attached &&
+      eventSessionId === attached.sessionId &&
+      shouldMarkAttachedBusyFromEvent(event)
+    ) {
       void markAttachedSessionBusy(attached.sessionId);
     }
 
@@ -959,6 +1031,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       }
     }
 
+    if (config.bot.trackBackgroundSessions) {
+      backgroundSessionTracker.processEvent(event, getCurrentSession()?.id ?? null);
+    }
+
     summaryAggregator.processEvent(event);
   }).catch((err) => {
     logger.error("Failed to subscribe to events:", err);
@@ -970,37 +1046,41 @@ export function createBot(): Bot<Context> {
   sessionCompletionTasks.clear();
   attachManager.clear("bot_startup");
   assistantRunState.clearAll("bot_startup");
+  backgroundSessionTracker.clear();
 
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
   }
 
-  const botOptions: ConstructorParameters<typeof Bot<Context>>[1] = {};
-
-  if (config.telegram.proxyUrl) {
-    const proxyUrl = config.telegram.proxyUrl;
-    let agent;
-
-    if (proxyUrl.startsWith("socks")) {
-      agent = new SocksProxyAgent(proxyUrl);
-      logger.info(`[Bot] Using SOCKS proxy: ${proxyUrl.replace(/\/\/.*@/, "//***@")}`);
-    } else {
-      agent = new HttpsProxyAgent(proxyUrl);
-      logger.info(`[Bot] Using HTTP/HTTPS proxy: ${proxyUrl.replace(/\/\/.*@/, "//***@")}`);
-    }
-
-    botOptions.client = {
-      baseFetchConfig: {
-        agent,
-        compress: true,
-      },
-    };
-  }
+  const botOptions = createTelegramBotOptions(config.telegram);
 
   const bot = new Bot(config.telegram.token, botOptions);
   botInstance = bot;
   chatIdInstance = config.telegram.allowedUserId;
+
+  unsubscribeReadyRestore?.();
+  unsubscribeReadyRestore = opencodeReadyLifecycle.onReady(async (reason) => {
+    const restored = await restoreAttachedCurrentSession({
+      bot,
+      chatId: config.telegram.allowedUserId,
+      ensureEventSubscription,
+      forceFullRestore: true,
+    });
+
+    if (restored) {
+      logger.info(`[Bot] Restored followed session after OpenCode ready: reason=${reason}`);
+      return;
+    }
+
+    const currentProject = getCurrentProject();
+    if (config.bot.trackBackgroundSessions && currentProject?.worktree) {
+      await ensureEventSubscription(currentProject.worktree);
+      logger.info(
+        `[Bot] Started background session tracking after OpenCode ready: reason=${reason}, directory=${currentProject.worktree}`,
+      );
+    }
+  });
 
   // Heartbeat for diagnostics: verify the event loop is not blocked
   let heartbeatCounter = 0;
@@ -1074,9 +1154,11 @@ export function createBot(): Bot<Context> {
   bot.command("projects", projectsCommand);
   bot.command("worktree", worktreeCommand);
   bot.command("open", openCommand);
+  bot.command("ls", lsCommand);
   bot.command("sessions", sessionsCommand);
   bot.command("new", (ctx) => newCommand(ctx, { bot, ensureEventSubscription }));
   bot.command("abort", abortCommand);
+  bot.command("detach", detachCommand);
   bot.command("task", taskCommand);
   bot.command("tasklist", taskListCommand);
   bot.command("rename", renameCommand);
@@ -1096,15 +1178,21 @@ export function createBot(): Bot<Context> {
     }
 
     try {
+      const handledBackgroundSession = await handleBackgroundSessionOpen(ctx, {
+        bot,
+        ensureEventSubscription,
+      });
       const handledInlineCancel = await handleInlineMenuCancel(ctx);
       if (handledInlineCancel) {
         // Clean up path index when the open-directory menu is cancelled
         clearOpenPathIndex();
+        clearLsPathIndex();
       }
       const handledSession = await handleSessionSelect(ctx, { bot, ensureEventSubscription });
-      const handledProject = await handleProjectSelect(ctx);
-      const handledWorktree = await handleWorktreeCallback(ctx);
-      const handledOpen = await handleOpenCallback(ctx);
+      const handledProject = await handleProjectSelect(ctx, { ensureEventSubscription });
+      const handledWorktree = await handleWorktreeCallback(ctx, { ensureEventSubscription });
+      const handledOpen = await handleOpenCallback(ctx, { ensureEventSubscription });
+      const handledLs = await handleLsCallback(ctx);
       const handledQuestion = await handleQuestionCallback(ctx);
       const handledPermission = await handlePermissionCallback(ctx);
       const handledAgent = await handleAgentSelect(ctx);
@@ -1119,15 +1207,17 @@ export function createBot(): Bot<Context> {
       const handledMcps = await handleMcpsCallback(ctx);
 
       logger.debug(
-        `[Bot] Callback handled: inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, worktree=${handledWorktree}, open=${handledOpen}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, task=${handledTask}, taskList=${handledTaskList}, rename=${handledRenameCancel}, commands=${handledCommands}, skills=${handledSkills}, mcps=${handledMcps}`,
+        `[Bot] Callback handled: backgroundSession=${handledBackgroundSession}, inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, worktree=${handledWorktree}, open=${handledOpen}, ls=${handledLs}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, task=${handledTask}, taskList=${handledTaskList}, rename=${handledRenameCancel}, commands=${handledCommands}, skills=${handledSkills}, mcps=${handledMcps}`,
       );
 
       if (
+        !handledBackgroundSession &&
         !handledInlineCancel &&
         !handledSession &&
         !handledProject &&
         !handledWorktree &&
         !handledOpen &&
+        !handledLs &&
         !handledQuestion &&
         !handledPermission &&
         !handledAgent &&
@@ -1255,16 +1345,6 @@ export function createBot(): Bot<Context> {
   // Voice and audio message handlers (STT transcription -> prompt)
   const voicePromptDeps = { bot, ensureEventSubscription };
 
-  safeBackgroundTask({
-    taskName: "bot.restoreFollowedSession",
-    task: () =>
-      restoreAttachedCurrentSession({
-        bot,
-        chatId: config.telegram.allowedUserId,
-        ensureEventSubscription,
-      }),
-  });
-
   bot.on("message:voice", async (ctx) => {
     logger.debug(`[Bot] Received voice message, chatId=${ctx.chat.id}`);
     botInstance = bot;
@@ -1355,8 +1435,11 @@ export function createBot(): Bot<Context> {
 }
 
 export function cleanupBotRuntime(reason: string): void {
+  unsubscribeReadyRestore?.();
+  unsubscribeReadyRestore = null;
   stopEventListening();
   summaryAggregator.clear();
+  backgroundSessionTracker.clear();
   responseStreamer.clearAll(reason);
   toolCallStreamer.clearAll(reason);
   toolMessageBatcher.clearAll(reason);

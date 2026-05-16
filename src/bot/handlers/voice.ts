@@ -10,6 +10,7 @@ import { isSttConfigured, transcribeAudio, type SttResult } from "../../stt/clie
 import { processUserPrompt, type ProcessPromptDeps } from "./prompt.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
+import { buildTelegramFileUrl } from "../utils/telegram-file-url.js";
 
 const TELEGRAM_DOWNLOAD_TIMEOUT_MS = 30_000;
 const TELEGRAM_DOWNLOAD_MAX_REDIRECTS = 3;
@@ -40,9 +41,13 @@ async function downloadTelegramFileByUrl(url: string, redirectDepth: number = 0)
     const targetUrl = new URL(url);
     const requestModule = targetUrl.protocol === "http:" ? http : https;
 
+    const proxySecret = config.telegram.proxySecret;
     const request = requestModule.get(
       targetUrl,
-      { agent: getTelegramDownloadAgent() },
+      {
+        agent: getTelegramDownloadAgent(),
+        ...(proxySecret ? { headers: { "X-Proxy-Secret": proxySecret } } : {}),
+      },
       (response) => {
         const statusCode = response.statusCode ?? 0;
 
@@ -123,7 +128,7 @@ async function downloadTelegramFile(
       return null;
     }
 
-    const fileUrl = `https://api.telegram.org/file/bot${ctx.api.token}/${file.file_path}`;
+    const fileUrl = buildTelegramFileUrl(file.file_path);
 
     logger.debug(`[Voice] Downloading file: ${file.file_path} (${file.file_size ?? "?"} bytes)`);
 

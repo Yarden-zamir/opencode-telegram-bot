@@ -1,8 +1,11 @@
+// @ts-expect-error — node-fetch v2 ships no TS types and we avoid adding @types/node-fetch
+import nodeFetch from "node-fetch";
 import type { Api } from "grammy";
-import { config } from "../../config.js";
+import { Agent as HttpsAgent } from "https";
 import { logger } from "../../utils/logger.js";
+import { config } from "../../config.js";
+import { buildTelegramFileUrl } from "./telegram-file-url.js";
 
-const TELEGRAM_FILE_URL_BASE = "https://api.telegram.org/file/bot";
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB Telegram limit
 
 export interface DownloadedFile {
@@ -31,7 +34,7 @@ export async function downloadTelegramFile(api: Api, fileId: string): Promise<Do
     throw new Error(`File too large: ${sizeMb}MB (max 20MB)`);
   }
 
-  const fileUrl = `${TELEGRAM_FILE_URL_BASE}${config.telegram.token}/${file.file_path}`;
+  const fileUrl = buildTelegramFileUrl(file.file_path);
   logger.debug(`[FileDownload] Downloading from ${fileUrl.replace(config.telegram.token, "***")}`);
 
   const fetchOptions: RequestInit & { agent?: unknown } = {};
@@ -40,9 +43,19 @@ export async function downloadTelegramFile(api: Api, fileId: string): Promise<Do
   if (config.telegram.proxyUrl) {
     const { HttpsProxyAgent } = await import("https-proxy-agent");
     fetchOptions.agent = new HttpsProxyAgent(config.telegram.proxyUrl);
+  } else if (config.telegram.forceIpv4) {
+    fetchOptions.agent = new HttpsAgent({ family: 4, keepAlive: true });
   }
 
-  const response = await fetch(fileUrl, fetchOptions);
+  // Send shared secret when custom API root expects it
+  if (config.telegram.proxySecret) {
+    fetchOptions.headers = {
+      ...(fetchOptions.headers as Record<string, string> | undefined),
+      "X-Proxy-Secret": config.telegram.proxySecret,
+    };
+  }
+
+  const response = await nodeFetch(fileUrl, fetchOptions);
 
   if (!response.ok) {
     throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);

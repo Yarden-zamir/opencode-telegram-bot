@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Context } from "grammy";
 import {
   attachToSession,
+  detachAttachedSession,
   restoreAttachedCurrentSession,
 } from "../../src/attach/service.js";
 import { attachManager } from "../../src/attach/manager.js";
@@ -18,6 +19,7 @@ const mocked = vi.hoisted(() => ({
     title: "Session One",
     directory: "D:\\Projects\\Repo",
   } as { id: string; title: string; directory: string } | null,
+  healthMock: vi.fn(),
   sessionStatusMock: vi.fn(),
   questionListMock: vi.fn(),
   permissionListMock: vi.fn(),
@@ -36,6 +38,7 @@ const mocked = vi.hoisted(() => ({
   showCurrentQuestionMock: vi.fn(),
   showPermissionRequestMock: vi.fn(),
   ensureEventSubscriptionMock: vi.fn(),
+  stopEventListeningMock: vi.fn(),
 }));
 
 vi.mock("../../src/settings/manager.js", () => ({
@@ -48,6 +51,9 @@ vi.mock("../../src/session/manager.js", () => ({
 
 vi.mock("../../src/opencode/client.js", () => ({
   opencodeClient: {
+    global: {
+      health: mocked.healthMock,
+    },
     session: {
       status: mocked.sessionStatusMock,
     },
@@ -58,6 +64,10 @@ vi.mock("../../src/opencode/client.js", () => ({
       list: mocked.permissionListMock,
     },
   },
+}));
+
+vi.mock("../../src/opencode/events.js", () => ({
+  stopEventListening: mocked.stopEventListeningMock,
 }));
 
 vi.mock("../../src/summary/aggregator.js", () => ({
@@ -121,6 +131,9 @@ describe("attach/service", () => {
     };
 
     mocked.sessionStatusMock.mockReset();
+    mocked.healthMock.mockReset();
+    mocked.healthMock.mockResolvedValue({ data: { healthy: true }, error: null });
+    mocked.sessionStatusMock.mockReset();
     mocked.sessionStatusMock.mockResolvedValue({
       data: {
         "session-1": { type: "idle" },
@@ -159,6 +172,7 @@ describe("attach/service", () => {
     mocked.showPermissionRequestMock.mockResolvedValue(undefined);
     mocked.ensureEventSubscriptionMock.mockReset();
     mocked.ensureEventSubscriptionMock.mockResolvedValue(undefined);
+    mocked.stopEventListeningMock.mockReset();
   });
 
   it("follows an idle session and updates attach state", async () => {
@@ -286,6 +300,57 @@ describe("attach/service", () => {
 
     expect(restored).toBe(false);
     expect(mocked.ensureEventSubscriptionMock).not.toHaveBeenCalled();
+    expect(attachManager.getSnapshot()).toBeNull();
+  });
+
+  it("skips guarded startup restore when OpenCode server is unavailable", async () => {
+    mocked.healthMock.mockRejectedValueOnce(new Error("fetch failed"));
+
+    const restored = await restoreAttachedCurrentSession({
+      bot: createBot(),
+      chatId: 777,
+      ensureEventSubscription: mocked.ensureEventSubscriptionMock,
+    });
+
+    expect(restored).toBe(false);
+    expect(mocked.pinnedLoadContextFromHistoryMock).not.toHaveBeenCalled();
+    expect(mocked.sessionStatusMock).not.toHaveBeenCalled();
+    expect(mocked.questionListMock).not.toHaveBeenCalled();
+    expect(mocked.permissionListMock).not.toHaveBeenCalled();
+    expect(mocked.ensureEventSubscriptionMock).not.toHaveBeenCalled();
+  });
+
+  it("full restore repeats API-backed state without duplicating event subscription", async () => {
+    const bot = createBot();
+
+    await attachToSession({
+      bot,
+      chatId: 777,
+      session: mocked.currentSession!,
+      ensureEventSubscription: mocked.ensureEventSubscriptionMock,
+    });
+
+    const result = await attachToSession({
+      bot,
+      chatId: 777,
+      session: mocked.currentSession!,
+      ensureEventSubscription: mocked.ensureEventSubscriptionMock,
+      forceFullRestore: true,
+    });
+
+    expect(result.alreadyAttached).toBe(true);
+    expect(mocked.ensureEventSubscriptionMock).toHaveBeenCalledTimes(1);
+    expect(mocked.pinnedLoadContextFromHistoryMock).toHaveBeenCalledTimes(1);
+    expect(mocked.sessionStatusMock).toHaveBeenCalledTimes(2);
+    expect(mocked.questionListMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("detaches locally without stopping the directory event listener", () => {
+    attachManager.attach("session-1", "D:\\Projects\\Repo");
+
+    detachAttachedSession("detach_command");
+
+    expect(mocked.stopEventListeningMock).not.toHaveBeenCalled();
     expect(attachManager.getSnapshot()).toBeNull();
   });
 });

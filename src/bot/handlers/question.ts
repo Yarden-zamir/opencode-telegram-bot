@@ -8,8 +8,14 @@ import { interactionManager } from "../../interaction/manager.js";
 import { logger } from "../../utils/logger.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { t } from "../../i18n/index.js";
+import { editRenderedBotPart, sendRenderedBotPart } from "../utils/telegram-text.js";
+import type { TelegramRenderedPart } from "../../telegram/render/types.js";
+import type { MessageEntity } from "grammy/types";
 
 const MAX_BUTTON_LENGTH = 60;
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+const TRUNCATION_SUFFIX = "…";
+const QUESTION_EMOJI = "❓";
 
 function getCallbackMessageId(ctx: Context): number | null {
   const message = ctx.callbackQuery?.message;
@@ -234,7 +240,7 @@ async function updateQuestionMessage(ctx: Context): Promise<void> {
     return;
   }
 
-  const text = formatQuestionText(question);
+  const part = formatQuestionDetailsPart(question);
   const keyboard = buildQuestionKeyboard(
     question,
     questionManager.getSelectedOptions(questionManager.getCurrentIndex()),
@@ -243,8 +249,24 @@ async function updateQuestionMessage(ctx: Context): Promise<void> {
   logger.debug("[QuestionHandler] Updating question message");
 
   try {
-    await ctx.editMessageText(text, {
-      reply_markup: keyboard,
+    const chatId = ctx.chat?.id;
+    const messageId = getCallbackMessageId(ctx);
+
+    if (!chatId || messageId === null) {
+      await ctx.editMessageText(part.fallbackText, {
+        reply_markup: keyboard,
+      });
+      return;
+    }
+
+    await editRenderedBotPart({
+      api: ctx.api,
+      chatId,
+      messageId,
+      part,
+      options: {
+        reply_markup: keyboard,
+      },
     });
   } catch (err) {
     logger.error("[QuestionHandler] Failed to update message:", err);
@@ -261,7 +283,7 @@ export async function showCurrentQuestion(bot: Context["api"], chatId: number): 
 
   logger.debug(`[QuestionHandler] Showing question: ${question.header} - ${question.question}`);
 
-  const text = formatQuestionText(question);
+  const part = formatQuestionDetailsPart(question);
   const keyboard = buildQuestionKeyboard(
     question,
     questionManager.getSelectedOptions(questionManager.getCurrentIndex()),
@@ -270,14 +292,19 @@ export async function showCurrentQuestion(bot: Context["api"], chatId: number): 
   logger.debug(`[QuestionHandler] Sending message with keyboard, chatId=${chatId}`);
 
   try {
-    const message = await bot.sendMessage(chatId, text, {
-      reply_markup: keyboard,
+    const { messageId } = await sendRenderedBotPart({
+      api: bot,
+      chatId,
+      part,
+      options: {
+        reply_markup: keyboard,
+      },
     });
+    questionManager.addMessageId(messageId);
 
-    logger.debug(`[QuestionHandler] Message sent, messageId=${message.message_id}`);
+    logger.debug(`[QuestionHandler] Message sent, messageId=${messageId}`);
 
-    questionManager.addMessageId(message.message_id);
-    questionManager.setActiveMessageId(message.message_id);
+    questionManager.setActiveMessageId(messageId);
     syncQuestionInteractionState(
       "callback",
       questionManager.getCurrentIndex(),
@@ -431,19 +458,92 @@ async function sendAllAnswersToAgent(bot: Context["api"], chatId: number): Promi
   });
 }
 
-function formatQuestionText(question: {
+function formatQuestionDetailsPart(question: {
   header: string;
   question: string;
+  options: Array<{ label: string; description: string }>;
   multiple?: boolean;
-}): string {
+}): TelegramRenderedPart {
   const currentIndex = questionManager.getCurrentIndex();
   const totalQuestions = questionManager.getTotalQuestions();
   const progressText = totalQuestions > 0 ? `${currentIndex + 1}/${totalQuestions}` : "";
 
-  const headerTitle = [progressText, question.header].filter(Boolean).join(" ");
-  const header = headerTitle ? `${headerTitle}\n\n` : "";
+  const headerTitle = [QUESTION_EMOJI, progressText, question.header].filter(Boolean).join(" ");
+  const textParts: string[] = [];
+  const entities: MessageEntity[] = [];
+
+  if (headerTitle) {
+    textParts.push(headerTitle);
+    entities.push({ type: "bold", offset: 0, length: headerTitle.length });
+  }
+
   const multiple = question.multiple ? t("question.multi_hint") : "";
-  return `${header}${question.question}${multiple}`;
+  const questionText = `${question.question}${multiple}`;
+  if (questionText) {
+    textParts.push(questionText);
+  }
+
+  for (const option of question.options) {
+    const optionText = formatOptionDetails(option);
+    const offset = textParts.join("\n\n").length + (textParts.length > 0 ? 2 : 0);
+
+    if (option.label) {
+      entities.push({ type: "bold", offset, length: option.label.length });
+    }
+
+    textParts.push(optionText);
+  }
+
+  const text = textParts.filter(Boolean).join("\n\n");
+  const truncated = truncateQuestionPart(text, entities);
+
+  return {
+    text: truncated.text,
+    entities: truncated.entities.length > 0 ? truncated.entities : undefined,
+    fallbackText: truncated.text,
+    source: truncated.entities.length > 0 ? "entities" : "plain",
+  };
+}
+
+function truncateQuestionPart(
+  text: string,
+  entities: MessageEntity[],
+): { text: string; entities: MessageEntity[] } {
+  if (text.length <= TELEGRAM_MESSAGE_LIMIT) {
+    return { text, entities };
+  }
+
+  const maxBaseLength = TELEGRAM_MESSAGE_LIMIT - TRUNCATION_SUFFIX.length;
+  let endIndex = maxBaseLength;
+
+  if (endIndex > 0 && isHighSurrogate(text.charCodeAt(endIndex - 1))) {
+    endIndex -= 1;
+  }
+
+  const truncatedText = `${text.slice(0, endIndex)}${TRUNCATION_SUFFIX}`;
+  const truncatedEntities = entities
+    .filter((entity) => entity.offset < endIndex)
+    .map((entity) => ({
+      ...entity,
+      length: Math.min(entity.length, endIndex - entity.offset),
+    }))
+    .filter((entity) => entity.length > 0);
+
+  return { text: truncatedText, entities: truncatedEntities };
+}
+
+function isHighSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xd800 && codeUnit <= 0xdbff;
+}
+
+function formatOptionDetails(option: { label: string; description: string }): string {
+  const optionTitle = option.label;
+
+  if (!option.description) {
+    return optionTitle;
+  }
+
+  return `${optionTitle} — ${option.description}`;
 }
 
 function buildQuestionKeyboard(
@@ -459,7 +559,7 @@ function buildQuestionKeyboard(
   question.options.forEach((option, index) => {
     const isSelected = selectedOptions.has(index);
     const icon = isSelected ? "✅ " : "";
-    const buttonText = formatButtonText(option.label, option.description, icon);
+    const buttonText = formatButtonText(option.label, icon);
     const callbackData = `question:select:${questionIndex}:${index}`;
 
     logger.debug(`[QuestionHandler] Button ${index}: "${buttonText}" -> "${callbackData}"`);
@@ -483,12 +583,8 @@ function buildQuestionKeyboard(
   return keyboard;
 }
 
-function formatButtonText(label: string, description: string, icon: string): string {
+function formatButtonText(label: string, icon: string): string {
   let text = `${icon}${label}`;
-
-  if (description && icon === "") {
-    text += ` - ${description}`;
-  }
 
   if (text.length > MAX_BUTTON_LENGTH) {
     text = text.substring(0, MAX_BUTTON_LENGTH - 3) + "...";

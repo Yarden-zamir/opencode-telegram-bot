@@ -4,6 +4,7 @@ export const fr: I18nDictionary = {
   "cmd.description.status": "Statut du serveur et de la session",
   "cmd.description.new": "Créer une nouvelle session",
   "cmd.description.stop": "Arrêter l'action en cours",
+  "cmd.description.detach": "Se détacher de la session actuelle",
   "cmd.description.sessions": "Lister les sessions",
   "cmd.description.tts": "Basculer les réponses audio",
   "cmd.description.projects": "Lister les projets",
@@ -15,6 +16,7 @@ export const fr: I18nDictionary = {
   "cmd.description.mcps": "MCP servers",
   "cmd.description.opencode_start": "Démarrer le serveur OpenCode",
   "cmd.description.opencode_stop": "Arrêter le serveur OpenCode",
+  "cmd.description.ls": "Lister le contenu du répertoire",
   "cmd.description.help": "Aide",
 
   "callback.unknown_command": "Commande inconnue",
@@ -76,6 +78,13 @@ export const fr: I18nDictionary = {
   "bot.session_retry":
     "🔁 {message}\n\nLe fournisseur renvoie la même erreur à chaque nouvelle tentative. Utilisez /abort pour arrêter.",
   "bot.external_user_input": "Entrée utilisateur externe",
+  "background.session_fallback": "session {id}",
+  "background.assistant_response":
+    "🔔 L'assistant a répondu dans une session en arrière-plan : {session}",
+  "background.question_asked": "❓ Une session en arrière-plan attend une réponse : {session}",
+  "background.permission_asked":
+    "🔐 Une session en arrière-plan a demandé des autorisations : {session}",
+  "background.open_session_button": "Ouvrir la session",
   "bot.unknown_command":
     "⚠️ Commande inconnue : {command}. Utilisez /help pour voir les commandes disponibles.",
   "bot.photo_downloading": "⏳ Téléchargement de la photo...",
@@ -172,6 +181,13 @@ export const fr: I18nDictionary = {
   "attach.disconnect_hint":
     "Pour vous déconnecter, passez simplement à une autre session ou à un autre projet.",
   "attach.error": "🔴 Impossible de se connecter à la session actuelle.",
+
+  "detach.project_not_selected":
+    "🏗 Aucun projet n'est sélectionné.\n\nSélectionnez d'abord un projet avec /projects.",
+  "detach.no_active_session": "ℹ️ Le bot n'est déjà attaché à aucune session.",
+  "detach.success":
+    "✅ Détaché de la session : {title}\n\nLa session OpenCode n'a pas été arrêtée. Si elle est toujours en cours, elle continuera séparément. Pour la consulter plus tard, sélectionnez-la à nouveau via /sessions.",
+  "detach.error": "🔴 Impossible de se détacher de la session actuelle.",
 
   "new.project_not_selected":
     "🏗 Aucun projet n'est sélectionné.\n\nSélectionnez d'abord un projet avec /projects.",
@@ -433,6 +449,10 @@ export const fr: I18nDictionary = {
   "task.kind.once": "ponctuelle",
   "task.run.success": "⏰ Tâche planifiée terminée : {description}",
   "task.run.error": "🔴 Échec de la tâche planifiée : {description}\n\nErreur : {error}",
+  "task.run.error.interactive_question":
+    "La tâche planifiée a demandé une question interactive et ne peut pas continuer sans intervention.",
+  "task.run.error.interactive_permission":
+    "La tâche planifiée a demandé une autorisation interactive et ne peut pas continuer sans intervention.",
 
   "tasklist.empty": "📭 Aucune tâche planifiée pour le moment.",
   "tasklist.select": "Sélectionnez une tâche planifiée :",
@@ -466,6 +486,14 @@ export const fr: I18nDictionary = {
   "commands.button.next_page": "Suivant ➡️",
   "commands.page_empty_callback": "Aucune commande sur cette page",
   "commands.page_load_error_callback": "Impossible de charger cette page. Veuillez réessayer.",
+  "commands.download.no_roots": "Aucune racine de navigation autorisée n'est configurée.",
+  "commands.download.downloading": "Téléchargement du fichier...",
+  "commands.download.not_found": "Fichier introuvable",
+  "commands.download.not_file": "Le chemin n'est pas un fichier",
+  "commands.download.file_too_large": "Le fichier est trop volumineux",
+  "commands.download.size": "Taille",
+  "commands.download.modified": "Modifié",
+  "commands.download.error": "Impossible de télécharger le fichier.",
 
   "skills.select": "Choisissez un skill OpenCode :",
   "skills.empty": "📭 Aucun skill OpenCode n'est disponible pour ce projet.",
@@ -553,4 +581,11 @@ export const fr: I18nDictionary = {
   "open.no_subfolders": "📭 Aucun sous-dossier",
   "open.subfolder_count": "{count} sous-dossier",
   "open.subfolders_count": "{count} sous-dossiers",
+  "ls.access_denied": "⛔ Accès refusé : le chemin est en dehors du projet actuel",
+  "ls.scan_error": "🔴 Impossible de lister le répertoire",
+  "ls.header": "Liste du répertoire",
+  "ls.total": "Total : {count} éléments",
+  "ls.file.header": "Détails du fichier",
+  "ls.file.download": "📥 Télécharger",
+  "ls.file.back": "⬅️ Retour",
 };

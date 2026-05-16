@@ -4,9 +4,12 @@ import { readFile } from "node:fs/promises";
 import { cleanupBotRuntime, createBot } from "../bot/index.js";
 import { config } from "../config.js";
 import { opencodeAutoRestartService } from "../opencode/auto-restart.js";
+import {
+  notifyOpencodeReadyIfHealthy,
+  registerOpenCodeReadyRefreshHandler,
+} from "../opencode/ready-refresh.js";
 import { loadSettings } from "../settings/manager.js";
 import { scheduledTaskRuntime } from "../scheduled-task/runtime.js";
-import { warmupSessionDirectoryCache } from "../session/cache-manager.js";
 import { reconcileStoredModelSelection } from "../model/manager.js";
 import { getRuntimeMode } from "../runtime/mode.js";
 import { getRuntimePaths } from "../runtime/paths.js";
@@ -14,6 +17,7 @@ import { clearServiceStateFile } from "../service/manager.js";
 import { getServiceStateFilePathFromEnv, isServiceChildProcess } from "../service/runtime.js";
 import { getLogFilePath, initializeLogger, logger } from "../utils/logger.js";
 import { wrapperToolServer } from "../wrapper-tools/server.js";
+import { safeBackgroundTask } from "../utils/safe-background-task.js";
 
 const SHUTDOWN_TIMEOUT_MS = 5000;
 
@@ -51,11 +55,16 @@ export async function startBotApp(): Promise<void> {
   await wrapperToolServer.start().catch((error) => {
     logger.warn("[WrapperTools] Failed to start OpenCode Telegram tools", error);
   });
-  await opencodeAutoRestartService.start();
-  await warmupSessionDirectoryCache();
-
+  registerOpenCodeReadyRefreshHandler();
   const bot = createBot();
   await scheduledTaskRuntime.initialize(bot);
+  safeBackgroundTask({
+    taskName: "app.opencodeStartup",
+    task: async () => {
+      await opencodeAutoRestartService.start();
+      await notifyOpencodeReadyIfHealthy("startup");
+    },
+  });
 
   let shutdownStarted = false;
   let serviceStateCleared = false;

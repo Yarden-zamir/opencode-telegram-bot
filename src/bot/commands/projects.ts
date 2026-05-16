@@ -21,6 +21,10 @@ import { ProjectInfo } from "../../settings/manager.js";
 const MAX_INLINE_BUTTON_LABEL_LENGTH = 64;
 const PROJECT_PAGE_CALLBACK_PREFIX = "projects:page:";
 
+interface ProjectSelectDeps {
+  ensureEventSubscription?: (directory: string) => Promise<void>;
+}
+
 interface ProjectsPaginationRange {
   page: number;
   totalPages: number;
@@ -223,9 +227,19 @@ export async function projectsCommand(ctx: CommandContext<Context>) {
   }
 }
 
-export async function handleProjectSelect(ctx: Context): Promise<boolean> {
+export async function handleProjectSelect(
+  ctx: Context,
+  deps: ProjectSelectDeps = {},
+): Promise<boolean> {
   const callbackQuery = ctx.callbackQuery;
   if (!callbackQuery?.data) {
+    return false;
+  }
+
+  const page = parseProjectPageCallback(callbackQuery.data);
+  const isProjectSelection = callbackQuery.data.startsWith("project:");
+
+  if (page === null && !isProjectSelection) {
     return false;
   }
 
@@ -234,7 +248,6 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     return true;
   }
 
-  const page = parseProjectPageCallback(callbackQuery.data);
   if (page !== null) {
     const isActiveMenu = await ensureActiveInlineMenu(ctx, "project");
     if (!isActiveMenu) {
@@ -262,10 +275,6 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     return true;
   }
 
-  if (!callbackQuery.data.startsWith("project:")) {
-    return false;
-  }
-
   const projectId = callbackQuery.data.replace("project:", "");
 
   const isActiveMenu = await ensureActiveInlineMenu(ctx, "project");
@@ -285,7 +294,11 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
 
     logger.info(`[Bot] Project selected: ${projectName} (id: ${projectId})`);
 
-    const keyboard = await switchToProject(ctx, selectedProject, "project_switched");
+    const keyboard = deps.ensureEventSubscription
+      ? await switchToProject(ctx, selectedProject, "project_switched", {
+          ensureEventSubscription: deps.ensureEventSubscription,
+        })
+      : await switchToProject(ctx, selectedProject, "project_switched");
 
     await ctx.answerCallbackQuery();
     await ctx.reply(t("projects.selected", { project: projectName }), {

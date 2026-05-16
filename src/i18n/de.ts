@@ -4,6 +4,7 @@ export const de: I18nDictionary = {
   "cmd.description.status": "Server- und Sitzungsstatus",
   "cmd.description.new": "Neue Sitzung erstellen",
   "cmd.description.stop": "Aktuelle Aktion stoppen",
+  "cmd.description.detach": "Von aktueller Sitzung trennen",
   "cmd.description.sessions": "Sitzungen auflisten",
   "cmd.description.tts": "Audioantworten umschalten",
   "cmd.description.projects": "Projekte auflisten",
@@ -15,6 +16,7 @@ export const de: I18nDictionary = {
   "cmd.description.mcps": "MCP servers",
   "cmd.description.opencode_start": "OpenCode-Server starten",
   "cmd.description.opencode_stop": "OpenCode-Server stoppen",
+  "cmd.description.ls": "Verzeichnisinhalt auflisten",
   "cmd.description.help": "Hilfe",
 
   "callback.unknown_command": "Unbekannter Befehl",
@@ -76,6 +78,12 @@ export const de: I18nDictionary = {
   "bot.session_retry":
     "🔁 {message}\n\nDer Provider liefert bei wiederholten Versuchen immer wieder denselben Fehler. Mit /abort abbrechen.",
   "bot.external_user_input": "Externe Benutzereingabe",
+  "background.session_fallback": "Sitzung {id}",
+  "background.assistant_response":
+    "🔔 Assistent hat in einer Hintergrundsitzung geantwortet: {session}",
+  "background.question_asked": "❓ Hintergrundsitzung benötigt eine Antwort: {session}",
+  "background.permission_asked": "🔐 Hintergrundsitzung hat Berechtigungen angefordert: {session}",
+  "background.open_session_button": "Sitzung öffnen",
   "bot.unknown_command":
     "⚠️ Unbekannter Befehl: {command}. Nutze /help, um verfügbare Befehle zu sehen.",
   "bot.photo_downloading": "⏳ Lade Foto herunter...",
@@ -172,6 +180,13 @@ export const de: I18nDictionary = {
   "attach.disconnect_hint":
     "Zum Trennen einfach zu einer anderen Sitzung oder einem anderen Projekt wechseln.",
   "attach.error": "🔴 Verbindung mit der aktuellen Sitzung fehlgeschlagen.",
+
+  "detach.project_not_selected":
+    "🏗 Projekt ist nicht ausgewählt.\n\nWähle zuerst ein Projekt mit /projects.",
+  "detach.no_active_session": "ℹ️ Der Bot ist bereits von allen Sitzungen getrennt.",
+  "detach.success":
+    "✅ Von Sitzung getrennt: {title}\n\nDie OpenCode-Sitzung wurde nicht gestoppt. Falls sie noch läuft, läuft sie separat weiter. Um sie später zu prüfen, wähle sie erneut über /sessions aus.",
+  "detach.error": "🔴 Trennen von der aktuellen Sitzung fehlgeschlagen.",
 
   "new.project_not_selected":
     "🏗 Projekt ist nicht ausgewählt.\n\nWähle zuerst ein Projekt mit /projects.",
@@ -431,6 +446,10 @@ export const de: I18nDictionary = {
   "task.kind.once": "einmalig",
   "task.run.success": "⏰ Geplante Aufgabe abgeschlossen: {description}",
   "task.run.error": "🔴 Geplante Aufgabe fehlgeschlagen: {description}\n\nFehler: {error}",
+  "task.run.error.interactive_question":
+    "Die geplante Aufgabe hat eine interaktive Frage gestellt und kann unbeaufsichtigt nicht fortfahren.",
+  "task.run.error.interactive_permission":
+    "Die geplante Aufgabe hat eine interaktive Berechtigung angefordert und kann unbeaufsichtigt nicht fortfahren.",
 
   "tasklist.empty": "📭 Noch keine geplanten Aufgaben.",
   "tasklist.select": "Wähle eine geplante Aufgabe:",
@@ -465,6 +484,14 @@ export const de: I18nDictionary = {
   "commands.page_empty_callback": "Keine Befehle auf dieser Seite",
   "commands.page_load_error_callback":
     "Diese Seite konnte nicht geladen werden. Bitte versuche es erneut.",
+  "commands.download.no_roots": "Es sind keine erlaubten Browser-Wurzeln konfiguriert.",
+  "commands.download.downloading": "Datei wird heruntergeladen...",
+  "commands.download.not_found": "Datei nicht gefunden",
+  "commands.download.not_file": "Pfad ist keine Datei",
+  "commands.download.file_too_large": "Datei ist zu groß",
+  "commands.download.size": "Größe",
+  "commands.download.modified": "Geändert",
+  "commands.download.error": "Datei konnte nicht heruntergeladen werden.",
 
   "skills.select": "Wähle einen OpenCode-Skill:",
   "skills.empty": "📭 Für dieses Projekt sind keine OpenCode-Skills verfügbar.",
@@ -554,4 +581,11 @@ export const de: I18nDictionary = {
   "open.no_subfolders": "📭 Keine Unterordner",
   "open.subfolder_count": "{count} Unterordner",
   "open.subfolders_count": "{count} Unterordner",
+  "ls.access_denied": "⛔ Zugriff verweigert: Pfad liegt außerhalb des aktuellen Projekts",
+  "ls.scan_error": "🔴 Verzeichnis kann nicht aufgelistet werden",
+  "ls.header": "Verzeichnisinhalt",
+  "ls.total": "Gesamt: {count} Einträge",
+  "ls.file.header": "Dateidetails",
+  "ls.file.download": "📥 Herunterladen",
+  "ls.file.back": "⬅️ Zurück",
 };

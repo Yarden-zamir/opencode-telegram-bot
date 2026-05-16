@@ -2,6 +2,7 @@ export const en = {
   "cmd.description.status": "Server and session status",
   "cmd.description.new": "Create a new session",
   "cmd.description.stop": "Stop current action",
+  "cmd.description.detach": "Detach from current session",
   "cmd.description.sessions": "List sessions",
   "cmd.description.tts": "Toggle audio replies",
   "cmd.description.projects": "List projects",
@@ -13,6 +14,7 @@ export const en = {
   "cmd.description.mcps": "MCP servers",
   "cmd.description.opencode_start": "Start OpenCode server",
   "cmd.description.opencode_stop": "Stop OpenCode server",
+  "cmd.description.ls": "List directory contents",
   "cmd.description.help": "Help",
 
   "callback.unknown_command": "Unknown command",
@@ -73,6 +75,11 @@ export const en = {
   "bot.session_retry":
     "🔁 {message}\n\nProvider keeps returning the same error on repeated retries. Use /abort to abort.",
   "bot.external_user_input": "External user input",
+  "background.session_fallback": "session {id}",
+  "background.assistant_response": "🔔 Assistant replied in background session: {session}",
+  "background.question_asked": "❓ Background session needs an answer: {session}",
+  "background.permission_asked": "🔐 Background session requested permissions: {session}",
+  "background.open_session_button": "Open session",
   "bot.unknown_command": "⚠️ Unknown command: {command}. Use /help to see available commands.",
   "bot.photo_downloading": "⏳ Downloading photo...",
   "bot.photo_too_large": "⚠️ Photo is too large (max {maxSizeMb}MB)",
@@ -162,9 +169,15 @@ export const en = {
   "attach.status.busy_message": "Status: busy. New prompts are temporarily blocked.",
   "attach.restored_question": "Recovered a pending question for this session.",
   "attach.restored_permissions": "Recovered pending permission requests: {count}.",
-  "attach.disconnect_hint":
-    "To disconnect, switch to another session or project.",
+  "attach.disconnect_hint": "To disconnect, switch to another session or project.",
   "attach.error": "🔴 Failed to attach to the current session.",
+
+  "detach.project_not_selected":
+    "🏗 Project is not selected.\n\nFirst select a project with /projects.",
+  "detach.no_active_session": "ℹ️ Bot is already detached from any session.",
+  "detach.success":
+    "✅ Detached from session: {title}\n\nThe OpenCode session was not stopped. If it is still running, it will continue separately. To check it later, select it again via /sessions.",
+  "detach.error": "🔴 Failed to detach from the current session.",
 
   "new.project_not_selected":
     "🏗 Project is not selected.\n\nFirst select a project with /projects.",
@@ -415,6 +428,10 @@ export const en = {
   "task.kind.once": "one-time",
   "task.run.success": "⏰ Scheduled task completed: {description}",
   "task.run.error": "🔴 Scheduled task failed: {description}\n\nError: {error}",
+  "task.run.error.interactive_question":
+    "Scheduled task requested an interactive question and cannot continue unattended.",
+  "task.run.error.interactive_permission":
+    "Scheduled task requested interactive permission and cannot continue unattended.",
 
   "tasklist.empty": "📭 No scheduled tasks yet.",
   "tasklist.select": "Select a scheduled task:",
@@ -447,6 +464,14 @@ export const en = {
   "commands.button.next_page": "Next ➡️",
   "commands.page_empty_callback": "No commands on this page",
   "commands.page_load_error_callback": "Cannot load this page. Please try again.",
+  "commands.download.no_roots": "No allowed browser roots are configured.",
+  "commands.download.downloading": "Downloading file...",
+  "commands.download.not_found": "File not found",
+  "commands.download.not_file": "Path is not a file",
+  "commands.download.file_too_large": "File is too large",
+  "commands.download.size": "Size",
+  "commands.download.modified": "Modified",
+  "commands.download.error": "Failed to download file.",
 
   "skills.select": "Choose an OpenCode skill:",
   "skills.empty": "📭 No OpenCode skills are available for this project.",
@@ -532,6 +557,13 @@ export const en = {
   "open.no_subfolders": "📭 No subfolders",
   "open.subfolder_count": "{count} subfolder",
   "open.subfolders_count": "{count} subfolders",
+  "ls.access_denied": "⛔ Access denied: path is outside the current project",
+  "ls.scan_error": "🔴 Cannot list directory",
+  "ls.header": "Directory Listing",
+  "ls.total": "Total: {count} items",
+  "ls.file.header": "File Details",
+  "ls.file.download": "📥 Download",
+  "ls.file.back": "⬅️ Back",
 } as const;
 
 export type I18nKey = keyof typeof en;

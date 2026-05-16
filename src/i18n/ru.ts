@@ -4,6 +4,7 @@ export const ru: I18nDictionary = {
   "cmd.description.status": "Статус сервера и сессии",
   "cmd.description.new": "Создать новую сессию",
   "cmd.description.stop": "Прервать текущее действие",
+  "cmd.description.detach": "Отсоединиться от текущей сессии",
   "cmd.description.sessions": "Список сессий",
   "cmd.description.tts": "Переключить аудиоответы",
   "cmd.description.projects": "Список проектов",
@@ -15,6 +16,7 @@ export const ru: I18nDictionary = {
   "cmd.description.mcps": "MCP серверы",
   "cmd.description.opencode_start": "Запустить OpenCode сервер",
   "cmd.description.opencode_stop": "Остановить OpenCode сервер",
+  "cmd.description.ls": "Список содержимого каталога",
   "cmd.description.help": "Справка",
 
   "callback.unknown_command": "Неизвестная команда",
@@ -72,6 +74,11 @@ export const ru: I18nDictionary = {
   "bot.session_retry":
     "🔁 {message}\n\nПровайдер возвращает одну и ту же ошибку при повторных запросах. Используйте /abort для остановки.",
   "bot.external_user_input": "Внешний ввод пользователя",
+  "background.session_fallback": "сессия {id}",
+  "background.assistant_response": "🔔 В фоновой сессии пришёл ответ ассистента: {session}",
+  "background.question_asked": "❓ В фоновой сессии нужен ответ: {session}",
+  "background.permission_asked": "🔐 В фоновой сессии запрошены права: {session}",
+  "background.open_session_button": "Открыть сессию",
   "bot.unknown_command": "⚠️ Неизвестная команда: {command}. Используйте /help для списка команд.",
   "bot.photo_downloading": "⏳ Скачиваю фото...",
   "bot.photo_too_large": "⚠️ Фото слишком большое (макс. {maxSizeMb}МБ)",
@@ -150,7 +157,8 @@ export const ru: I18nDictionary = {
   "sessions.preview.you": "Вы:",
   "sessions.preview.agent": "Агент:",
 
-  "attach.project_not_selected": "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
+  "attach.project_not_selected":
+    "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
   "attach.session_not_selected":
     "💬 Сессия не выбрана.\n\nСначала выберите сессию через /sessions.",
   "attach.session_project_mismatch":
@@ -161,9 +169,15 @@ export const ru: I18nDictionary = {
   "attach.status.busy_message": "Статус: busy. Новые промты временно заблокированы.",
   "attach.restored_question": "Восстановил ожидающий вопрос для этой сессии.",
   "attach.restored_permissions": "Восстановил ожидающие запросы разрешений: {count}.",
-  "attach.disconnect_hint":
-    "Чтобы отключиться, переключитесь на другую сессию или проект.",
+  "attach.disconnect_hint": "Чтобы отключиться, переключитесь на другую сессию или проект.",
   "attach.error": "🔴 Не удалось подключиться к текущей сессии.",
+
+  "detach.project_not_selected":
+    "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
+  "detach.no_active_session": "ℹ️ Бот уже не привязан ни к одной сессии.",
+  "detach.success":
+    "✅ Отсоединился от сессии: {title}\n\nOpenCode-сессия не остановлена. Если она еще выполняется, выполнение продолжится отдельно. Чтобы проверить ее позже, снова выберите эту сессию через /sessions.",
+  "detach.error": "🔴 Не удалось отсоединиться от текущей сессии.",
 
   "new.project_not_selected": "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
   "new.created": "✅ Создана новая сессия: {title}",
@@ -417,6 +431,10 @@ export const ru: I18nDictionary = {
   "task.kind.once": "однократная",
   "task.run.success": "⏰ Задача по расписанию выполнена: {description}",
   "task.run.error": "🔴 Ошибка выполнения задачи по расписанию: {description}\n\nОшибка: {error}",
+  "task.run.error.interactive_question":
+    "Задача по расписанию задала интерактивный вопрос и не может продолжить выполнение без участия пользователя.",
+  "task.run.error.interactive_permission":
+    "Задача по расписанию запросила интерактивное разрешение и не может продолжить выполнение без участия пользователя.",
 
   "tasklist.empty": "📭 Задач по расписанию пока нет.",
   "tasklist.select": "Выберите задачу по расписанию:",
@@ -451,6 +469,14 @@ export const ru: I18nDictionary = {
   "commands.page_empty_callback": "На этой странице нет команд",
   "commands.page_load_error_callback":
     "Не удалось загрузить эту страницу. Пожалуйста, попробуйте снова.",
+  "commands.download.no_roots": "Не настроены разрешённые корневые каталоги для просмотра.",
+  "commands.download.downloading": "Скачиваю файл...",
+  "commands.download.not_found": "Файл не найден",
+  "commands.download.not_file": "Путь не является файлом",
+  "commands.download.file_too_large": "Файл слишком большой",
+  "commands.download.size": "Размер",
+  "commands.download.modified": "Изменён",
+  "commands.download.error": "Не удалось скачать файл.",
 
   "skills.select": "Выберите скилл OpenCode:",
   "skills.empty": "📭 Для этого проекта нет доступных скиллов OpenCode.",
@@ -540,4 +566,11 @@ export const ru: I18nDictionary = {
   "open.no_subfolders": "📭 Нет подпапок",
   "open.subfolder_count": "{count} подпапка",
   "open.subfolders_count": "{count} подпапок",
+  "ls.access_denied": "⛔ Доступ запрещён: путь находится за пределами текущего проекта",
+  "ls.scan_error": "🔴 Не удается перечислить каталог",
+  "ls.header": "Список каталога",
+  "ls.total": "Всего: {count} элементов",
+  "ls.file.header": "Сведения о файле",
+  "ls.file.download": "📥 Скачать",
+  "ls.file.back": "⬅️ Назад",
 };

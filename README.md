@@ -28,6 +28,7 @@ Languages: English (`en`), Deutsch (`de`), Español (`es`), Français (`fr`), Р
 - **Remote coding** — send prompts to OpenCode from anywhere, receive complete results with code sent as files
 - **Session management** — create new sessions or continue existing ones, just like in the TUI
 - **Track live session** — follow a live OpenCode CLI session; see [Track Existing Session](#track-existing-session)
+- **Background session notifications** — get short notifications when detached or non-current sessions in the current project/worktree reply, ask questions, or request permissions
 - **Live status** — pinned message with current project/worktree, model, context usage, and changed files list, updated in real time
 - **Model switching** — pick models from OpenCode favorites and recent history directly in the chat (favorites are shown first)
 - **Agent modes** — switch between Plan and Build modes on the fly
@@ -43,6 +44,7 @@ Languages: English (`en`), Deutsch (`de`), Español (`es`), Français (`fr`), Р
 - **Git worktree switching** — browse and switch between existing git worktrees for the current repository with `/worktree`
 - **Security** — strict user ID whitelist; no one else can access your bot, even if they find it
 - **Localization** — UI localization is supported for multiple languages (`BOT_LOCALE`)
+- **Interactive file browser** — use `/ls` to browse files and directories inside the current project, open subdirectories, go back, and download files by tapping them
 
 Planned features currently in development are listed in [Current Task List](PRODUCT.md#current-task-list).
 
@@ -130,10 +132,12 @@ opencode-telegram config
 | `/status`         | Server health, current project, session, and model info |
 | `/new`            | Create a new session                                    |
 | `/abort`          | Abort the current task                                  |
+| `/detach`         | Detach from the current session without stopping it     |
 | `/sessions`       | Browse and switch between recent sessions               |
 | `/projects`       | Switch between OpenCode projects                        |
 | `/worktree`       | Switch between existing git worktrees                   |
 | `/open`           | Add a project by browsing directories                   |
+| `/ls`             | List directory contents, then tap to open or download   |
 | `/tts`            | Toggle audio replies                                    |
 | `/rename`         | Rename the current session                              |
 | `/commands`       | Browse and run custom commands                          |
@@ -205,6 +209,9 @@ When installed via npm, the configuration wizard handles the initial setup. The 
 | `TELEGRAM_BOT_TOKEN`                       | Bot token from @BotFather                                                                                             |   Yes    | —                        |
 | `TELEGRAM_ALLOWED_USER_ID`                 | Your numeric Telegram user ID                                                                                         |   Yes    | —                        |
 | `TELEGRAM_PROXY_URL`                       | Proxy URL for Telegram API (SOCKS5/HTTP)                                                                              |    No    | —                        |
+| `TELEGRAM_API_ROOT`                        | Custom Telegram Bot API root URL (e.g. nginx reverse-proxying `api.telegram.org`); applied to API calls and file downloads | No | `https://api.telegram.org` |
+| `TELEGRAM_PROXY_SECRET`                    | Shared secret sent as `X-Proxy-Secret` header on every Bot API request and file download (used with `TELEGRAM_API_ROOT`) | No | —                        |
+| `TELEGRAM_FORCE_IPV4`                      | Force IPv4 for direct Telegram API and file requests; useful when IPv6 DNS works but outbound IPv6 is broken           |    No    | `false`                  |
 | `OPENCODE_API_URL`                         | OpenCode server URL                                                                                                   |    No    | `http://localhost:4096`  |
 | `OPENCODE_AUTO_RESTART_ENABLED`            | Automatically restart a local OpenCode server when health-checks fail                                                 |    No    | `false`                  |
 | `OPENCODE_MONITOR_INTERVAL_SEC`            | Health monitor interval in seconds when OpenCode auto-restart is enabled                                              |    No    | `300`                    |
@@ -225,6 +232,7 @@ When installed via npm, the configuration wizard handles the initial setup. The 
 | `HIDE_ASSISTANT_RUN_FOOTER`                | Hide assistant run footer messages with agent, model, and elapsed time                                                |    No    | `true`                   |
 | `HIDE_TOOL_CALL_MESSAGES`                  | Hide tool-call service messages (`💻 bash ...`, `📖 read ...`, etc.)                                                  |    No    | `false`                  |
 | `HIDE_TOOL_FILE_MESSAGES`                  | Hide file edit documents sent as `.txt` attachments (`edit_*.txt`, `write_*.txt`)                                     |    No    | `false`                  |
+| `TRACK_BACKGROUND_SESSIONS`                | Track detached/non-current sessions in the current selected project/worktree and send short notifications             |    No    | `true`                   |
 | `RESPONSE_STREAMING`                       | Stream assistant replies while they are generated across one or more Telegram messages                                |    No    | `true`                   |
 | `MESSAGE_FORMAT_MODE`                      | Assistant reply formatting mode: `markdown` (Telegram MarkdownV2) or `raw`                                            |    No    | `markdown`               |
 | `CODE_FILE_MAX_SIZE_KB`                    | Max file size (KB) to send as document                                                                                |    No    | `100`                    |
@@ -245,6 +253,54 @@ When installed via npm, the configuration wizard handles the initial setup. The 
 > **Keep your `.env` file private.** It contains your bot token. Never commit it to version control.
 
 Logs are written to `./logs` when running from sources and to the runtime config directory `logs/` folder in `installed` mode. Log rotation depends on runtime mode: `sources` creates one file per bot launch, while `installed` appends to one file per day. Old log files are removed according to `LOG_RETENTION`.
+
+### Reverse Proxy (Optional)
+
+For environments that block `api.telegram.org` but allow your own HTTPS endpoint (corporate networks, restricted regions), you can route Bot API traffic through a reverse proxy you control. This is an alternative to the SOCKS/HTTP forward proxy configured with `TELEGRAM_PROXY_URL`.
+
+Set `TELEGRAM_API_ROOT` to your reverse-proxy URL — both Bot API calls and file downloads (including voice/audio files) will use it. Optionally set `TELEGRAM_PROXY_SECRET` so the bot sends an `X-Proxy-Secret` header your proxy can use to authorize callers.
+
+`.env`:
+
+```env
+TELEGRAM_API_ROOT=https://tg-proxy.yourdomain.com
+TELEGRAM_PROXY_SECRET=some-long-random-string
+```
+
+Example nginx config:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name tg-proxy.yourdomain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/tg-proxy.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/tg-proxy.yourdomain.com/privkey.pem;
+
+    access_log off;  # the bot token appears in URL paths
+    client_max_body_size 50m;
+
+    if ($http_x_proxy_secret != "some-long-random-string") { return 403; }
+
+    location / {
+        proxy_pass https://api.telegram.org;
+        proxy_ssl_server_name on;
+        proxy_set_header Host api.telegram.org;
+    }
+}
+```
+
+`TELEGRAM_API_ROOT` and `TELEGRAM_PROXY_URL` are alternative connectivity modes — the former picks the URL the bot connects to (a reverse proxy on your side), while the latter tunnels TCP through a forward proxy. Configure only one of them; the bot rejects using both at startup.
+
+### Force IPv4 for Telegram (Optional)
+
+If the bot fails during startup with errors such as `Network request for 'setMyCommands' failed` or `Network request for 'getWebhookInfo' failed`, and the same machine has broken outbound IPv6 connectivity, force direct Telegram requests to use IPv4:
+
+```env
+TELEGRAM_FORCE_IPV4=true
+```
+
+This affects direct Bot API calls and Telegram file downloads. It is not a replacement for `TELEGRAM_PROXY_URL` or `TELEGRAM_API_ROOT` when Telegram is blocked by the network.
 
 ### Voice and Audio Transcription (Optional)
 

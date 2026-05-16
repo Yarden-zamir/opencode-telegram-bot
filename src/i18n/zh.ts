@@ -4,6 +4,7 @@ export const zh: I18nDictionary = {
   "cmd.description.status": "服务器和会话状态",
   "cmd.description.new": "创建新会话",
   "cmd.description.stop": "停止当前操作",
+  "cmd.description.detach": "从当前会话分离",
   "cmd.description.sessions": "列出会话",
   "cmd.description.tts": "切换语音回复",
   "cmd.description.projects": "列出项目",
@@ -15,6 +16,7 @@ export const zh: I18nDictionary = {
   "cmd.description.mcps": "MCP servers",
   "cmd.description.opencode_start": "启动 OpenCode 服务器",
   "cmd.description.opencode_stop": "停止 OpenCode 服务器",
+  "cmd.description.ls": "列出目录内容",
   "cmd.description.help": "帮助",
 
   "callback.unknown_command": "未知命令",
@@ -64,6 +66,11 @@ export const zh: I18nDictionary = {
   "bot.session_error": "🔴 OpenCode 返回错误：{message}",
   "bot.session_retry": "🔁 {message}\n\n提供方在重复重试时持续返回同一错误。使用 /abort 可停止。",
   "bot.external_user_input": "外部用户输入",
+  "background.session_fallback": "会话 {id}",
+  "background.assistant_response": "🔔 助手已在后台会话中回复：{session}",
+  "background.question_asked": "❓ 后台会话需要回答：{session}",
+  "background.permission_asked": "🔐 后台会话请求了权限：{session}",
+  "background.open_session_button": "打开会话",
   "bot.unknown_command": "⚠️ 未知命令：{command}。使用 /help 查看可用命令。",
   "bot.photo_downloading": "⏳ 正在下载照片...",
   "bot.photo_too_large": "⚠️ 照片过大（最大 {maxSizeMb}MB）",
@@ -138,8 +145,7 @@ export const zh: I18nDictionary = {
 
   "attach.project_not_selected": "🏗 未选择项目。\n\n请先使用 /projects 选择一个项目。",
   "attach.session_not_selected": "💬 未选择会话。\n\n请先使用 /sessions 选择一个会话。",
-  "attach.session_project_mismatch":
-    "⚠️ 选中的会话与当前项目不匹配。请通过 /sessions 重新选择。",
+  "attach.session_project_mismatch": "⚠️ 选中的会话与当前项目不匹配。请通过 /sessions 重新选择。",
   "attach.connected": "✅ 已连接到会话：{title}",
   "attach.already_connected": "ℹ️ 已经连接到会话：{title}",
   "attach.status.idle_message": "状态：idle。正在等待新事件。",
@@ -148,6 +154,12 @@ export const zh: I18nDictionary = {
   "attach.restored_permissions": "已恢复待处理权限请求：{count}。",
   "attach.disconnect_hint": "如需断开连接，只需切换到其他会话或项目。",
   "attach.error": "🔴 无法连接到当前会话。",
+
+  "detach.project_not_selected": "🏗 未选择项目。\n\n请先使用 /projects 选择一个项目。",
+  "detach.no_active_session": "ℹ️ 机器人当前未附加到任何会话。",
+  "detach.success":
+    "✅ 已从会话分离：{title}\n\nOpenCode 会话未停止。如果它仍在运行，将继续独立执行。稍后可通过 /sessions 重新选择它来查看。",
+  "detach.error": "🔴 无法从当前会话分离。",
 
   "new.project_not_selected": "🏗 未选择项目。\n\n请先使用 /projects 选择一个项目。",
   "new.created": "✅ 新会话已创建：{title}",
@@ -376,6 +388,8 @@ export const zh: I18nDictionary = {
   "task.kind.once": "一次性",
   "task.run.success": "⏰ 定时任务已完成: {description}",
   "task.run.error": "🔴 定时任务执行失败: {description}\n\n错误: {error}",
+  "task.run.error.interactive_question": "定时任务请求了交互式问题，无法在无人值守时继续。",
+  "task.run.error.interactive_permission": "定时任务请求了交互式权限，无法在无人值守时继续。",
 
   "tasklist.empty": "📭 还没有定时任务。",
   "tasklist.select": "请选择一个定时任务：",
@@ -407,6 +421,14 @@ export const zh: I18nDictionary = {
   "commands.button.next_page": "下一页 ➡️",
   "commands.page_empty_callback": "这一页没有命令",
   "commands.page_load_error_callback": "无法加载此页面。请重试。",
+  "commands.download.no_roots": "未配置允许浏览的根目录。",
+  "commands.download.downloading": "正在下载文件...",
+  "commands.download.not_found": "未找到文件",
+  "commands.download.not_file": "该路径不是文件",
+  "commands.download.file_too_large": "文件过大",
+  "commands.download.size": "大小",
+  "commands.download.modified": "修改时间",
+  "commands.download.error": "下载文件失败。",
 
   "skills.select": "请选择一个 OpenCode 技能：",
   "skills.empty": "📭 当前项目没有可用的 OpenCode 技能。",
@@ -489,4 +511,11 @@ export const zh: I18nDictionary = {
   "open.no_subfolders": "📭 无子文件夹",
   "open.subfolder_count": "{count} 个子文件夹",
   "open.subfolders_count": "{count} 个子文件夹",
+  "ls.access_denied": "⛔ 访问被拒绝：路径在当前项目之外",
+  "ls.scan_error": "🔴 无法列出目录",
+  "ls.header": "目录列表",
+  "ls.total": "总计：{count} 个项目",
+  "ls.file.header": "文件详情",
+  "ls.file.download": "📥 下载",
+  "ls.file.back": "⬅️ 返回",
 };

@@ -496,7 +496,7 @@ async function downloadFileAndClose(ctx: Context, filePath: string): Promise<voi
     return;
   }
 
-  clearActiveInlineMenu("ls_downloaded");
+  clearActiveInlineMenu("ls_downloaded", ctx);
   clearLsPathIndex();
   await ctx.deleteMessage().catch(() => {});
 }

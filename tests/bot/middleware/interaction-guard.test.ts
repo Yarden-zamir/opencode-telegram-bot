@@ -14,6 +14,18 @@ function createTextContext(text: string): Context {
   } as unknown as Context;
 }
 
+function createForumTextContext(text: string, threadId?: number): Context {
+  return {
+    chat: { id: -100123, type: "supergroup", is_forum: true },
+    message: {
+      text,
+      ...(threadId ? { message_thread_id: threadId, is_topic_message: true } : {}),
+    } as Context["message"],
+    reply: vi.fn().mockResolvedValue(undefined),
+    answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Context;
+}
+
 function createCallbackContext(data: string): Context {
   return {
     callbackQuery: { data } as Context["callbackQuery"],
@@ -34,6 +46,8 @@ function createVoiceContext(): Context {
 describe("interactionGuardMiddleware", () => {
   beforeEach(() => {
     interactionManager.clear("test_setup");
+    interactionManager.clear("test_setup", "chat:-100123");
+    interactionManager.clear("test_setup", "-100123:42");
     foregroundSessionState.__resetForTests();
   });
 
@@ -126,6 +140,25 @@ describe("interactionGuardMiddleware", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(ctx.reply).toHaveBeenCalledWith(t("inline.blocked.command_not_allowed"));
+  });
+
+  it("does not let a General inline menu block topic commands", async () => {
+    interactionManager.start(
+      {
+        kind: "inline",
+        expectedInput: "callback",
+        allowedCommands: ["/status"],
+      },
+      "chat:-100123",
+    );
+
+    const ctx = createForumTextContext("/new", 42);
+    const next: NextFunction = vi.fn().mockResolvedValue(undefined);
+
+    await interactionGuardMiddleware(ctx, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(ctx.reply).not.toHaveBeenCalled();
   });
 
   it("shows permission-specific message for blocked text", async () => {

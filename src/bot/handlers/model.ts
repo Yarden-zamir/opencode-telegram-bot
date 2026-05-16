@@ -61,7 +61,7 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     const parts = callbackQuery.data.split(":");
     if (parts.length < 3) {
       logger.error(`[ModelHandler] Invalid callback data format: ${callbackQuery.data}`);
-      clearActiveInlineMenu("model_select_invalid_callback");
+      clearActiveInlineMenu("model_select_invalid_callback", ctx);
       await ctx.answerCallbackQuery({ text: t("model.change_error_callback") }).catch(() => {});
       return true;
     }
@@ -107,7 +107,7 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     );
     const displayName = formatModelForDisplay(modelInfo.providerID, modelInfo.modelID);
 
-    clearActiveInlineMenu("model_selected");
+    clearActiveInlineMenu("model_selected", ctx);
 
     // Send confirmation message with updated keyboard
     await ctx.answerCallbackQuery({ text: t("model.changed_callback", { name: displayName }) });
@@ -121,7 +121,7 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
 
     return true;
   } catch (err) {
-    clearActiveInlineMenu("model_select_error");
+    clearActiveInlineMenu("model_select_error", ctx);
     logger.error("[ModelHandler] Error handling model select:", err);
     await ctx.answerCallbackQuery({ text: t("model.change_error_callback") }).catch(() => {});
     return false;

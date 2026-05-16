@@ -3,6 +3,7 @@ import { interactionManager } from "../../interaction/manager.js";
 import type { InteractionState } from "../../interaction/types.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
+import { getScopeKeyFromContext } from "../scope.js";
 
 const INLINE_MENU_CANCEL_PREFIX = "inline:cancel:";
 const LEGACY_CONTEXT_CANCEL_CALLBACK = "compact:cancel";
@@ -98,6 +99,7 @@ export async function replyWithInlineMenu(
   ctx: Context,
   options: InlineMenuReplyOptions,
 ): Promise<number> {
+  const scopeKey = getScopeKeyFromContext(ctx);
   const keyboard = appendInlineMenuCancelButton(options.keyboard, options.menuKind);
   const replyOptions: {
     reply_markup: InlineKeyboard;
@@ -119,7 +121,7 @@ export async function replyWithInlineMenu(
       menuKind: options.menuKind,
       messageId: message.message_id,
     },
-  });
+  }, scopeKey);
 
   logger.debug(
     `[InlineMenu] Opened menu: kind=${options.menuKind}, messageId=${message.message_id}`,
@@ -132,7 +134,9 @@ export async function ensureActiveInlineMenu(
   ctx: Context,
   menuKind: InlineMenuKind,
 ): Promise<boolean> {
-  const activeMetadata = getActiveInlineMenuMetadata(interactionManager.getSnapshot());
+  const activeMetadata = getActiveInlineMenuMetadata(
+    interactionManager.getSnapshot(getScopeKeyFromContext(ctx)),
+  );
   const callbackMessageId = getCallbackMessageId(ctx);
 
   const isActive =
@@ -156,10 +160,11 @@ export async function ensureActiveInlineMenu(
   return false;
 }
 
-export function clearActiveInlineMenu(reason: string): void {
-  const state = interactionManager.getSnapshot();
+export function clearActiveInlineMenu(reason: string, ctx?: Context): void {
+  const scopeKey = ctx ? getScopeKeyFromContext(ctx) : undefined;
+  const state = interactionManager.getSnapshot(scopeKey);
   if (state?.kind === "inline") {
-    interactionManager.clear(reason);
+    interactionManager.clear(reason, scopeKey);
   }
 }
 
@@ -189,7 +194,7 @@ export async function handleInlineMenuCancel(ctx: Context): Promise<boolean> {
     return true;
   }
 
-  clearActiveInlineMenu(`inline_menu_cancel:${menuKind}`);
+  clearActiveInlineMenu(`inline_menu_cancel:${menuKind}`, ctx);
 
   await ctx.answerCallbackQuery({ text: t("inline.cancelled_callback") }).catch(() => {});
   await ctx.deleteMessage().catch(() => {});

@@ -96,7 +96,7 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
     // Send confirmation message with updated keyboard
     const displayName = formatVariantForDisplay(variantId);
 
-    clearActiveInlineMenu("variant_selected");
+    clearActiveInlineMenu("variant_selected", ctx);
 
     await ctx.answerCallbackQuery({ text: t("variant.changed_callback", { name: displayName }) });
     await ctx.reply(t("variant.changed_message", { name: displayName }), {
@@ -109,7 +109,7 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
 
     return true;
   } catch (err) {
-    clearActiveInlineMenu("variant_select_error");
+    clearActiveInlineMenu("variant_select_error", ctx);
     logger.error("[VariantHandler] Error handling variant select:", err);
     await ctx.answerCallbackQuery({ text: t("variant.change_error_callback") }).catch(() => {});
     return false;

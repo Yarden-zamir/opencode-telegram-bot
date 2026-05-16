@@ -253,6 +253,9 @@ function getKeyboardButtons(ctx: Context): Array<Array<{ text: string; callback_
 describe("bot/commands/sessions", () => {
   beforeEach(() => {
     interactionManager.clear("test_setup");
+    interactionManager.clear("test_setup", "chat:-100123");
+    interactionManager.clear("test_setup", "-100123:1");
+    interactionManager.clear("test_setup", "-100123:42");
     foregroundSessionState.__resetForTests();
     mocked.currentProject = {
       id: "project-1",
@@ -512,14 +515,17 @@ describe("bot/commands/sessions", () => {
       updatedAt: 1,
     });
 
-    interactionManager.start({
-      kind: "inline",
-      expectedInput: "callback",
-      metadata: {
-        menuKind: "session",
-        messageId: 456,
+    interactionManager.start(
+      {
+        kind: "inline",
+        expectedInput: "callback",
+        metadata: {
+          menuKind: "session",
+          messageId: 456,
+        },
       },
-    });
+      "-100123:1",
+    );
 
     const ctx = createGeneralTopicCallbackContext("session:session-1", 456);
     const handled = await handleSessionSelect(ctx, createDeps());
@@ -539,14 +545,17 @@ describe("bot/commands/sessions", () => {
       error: null,
     });
 
-    interactionManager.start({
-      kind: "inline",
-      expectedInput: "callback",
-      metadata: {
-        menuKind: "session",
-        messageId: 456,
+    interactionManager.start(
+      {
+        kind: "inline",
+        expectedInput: "callback",
+        metadata: {
+          menuKind: "session",
+          messageId: 456,
+        },
       },
-    });
+      "-100123:1",
+    );
 
     const ctx = createGeneralTopicCallbackContext("session:session-1", 456);
     const handled = await handleSessionSelect(ctx, createDeps());

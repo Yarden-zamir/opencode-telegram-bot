@@ -505,8 +505,8 @@ async function selectSessionById(
   }
 }
 
-function shouldBlockBackgroundSessionOpen(): boolean {
-  const activeInteraction = interactionManager.getSnapshot();
+function shouldBlockBackgroundSessionOpen(ctx: Context): boolean {
+  const activeInteraction = interactionManager.getSnapshot(getScopeKeyFromContext(ctx));
   return activeInteraction !== null && activeInteraction.kind !== "inline";
 }
 
@@ -529,7 +529,7 @@ export async function handleBackgroundSessionOpen(
     return true;
   }
 
-  if (shouldBlockBackgroundSessionOpen()) {
+  if (shouldBlockBackgroundSessionOpen(ctx)) {
     await ctx.answerCallbackQuery({ text: t("interaction.blocked.finish_current") }).catch(() => {});
     return true;
   }

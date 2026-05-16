@@ -10,6 +10,7 @@ import type {
 } from "./types.js";
 import { foregroundSessionState } from "../scheduled-task/foreground-state.js";
 import { attachManager } from "../attach/manager.js";
+import { getScopeKeyFromContext } from "../bot/scope.js";
 
 function normalizeIncomingCommand(text: string): string | null {
   const trimmed = text.trim();
@@ -129,12 +130,13 @@ function isAllowedTaskCallback(ctx: Context, state: InteractionState): boolean {
 }
 
 export function resolveInteractionGuardDecision(ctx: Context): GuardDecision {
-  const state = interactionManager.getSnapshot();
+  const scopeKey = getScopeKeyFromContext(ctx);
+  const state = interactionManager.getSnapshot(scopeKey);
   const { inputType, command } = classifyIncomingInput(ctx);
   const isBusy = foregroundSessionState.isBusy() || attachManager.isBusy();
 
-  if (state && interactionManager.isExpired()) {
-    interactionManager.clear("expired");
+  if (state && interactionManager.isExpired(Date.now(), scopeKey)) {
+    interactionManager.clear("expired", scopeKey);
     return createBlockDecision(inputType, state, "expired", command, isBusy);
   }
 

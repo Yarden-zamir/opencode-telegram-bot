@@ -121,7 +121,7 @@ import {
   type BackgroundSessionNotification,
 } from "../background-session/tracker.js";
 import { getSessionRouteTarget } from "../topic/manager.js";
-import { getScopeFromContext, getThreadSendOptions } from "./scope.js";
+import { getScopeFromContext, getScopeKeyFromContext, getThreadSendOptions } from "./scope.js";
 import { syncTopicTitleForSession } from "../topic/title-sync.js";
 import { ensureGeneralTopicName } from "./middleware/general-topic-name.js";
 
@@ -1203,7 +1203,7 @@ export function createBot(): Bot<Context> {
   bot.use(interactionGuardMiddleware);
 
   const blockMenuWhileInteractionActive = async (ctx: Context): Promise<boolean> => {
-    const activeInteraction = interactionManager.getSnapshot();
+    const activeInteraction = interactionManager.getSnapshot(getScopeKeyFromContext(ctx));
     if (!activeInteraction) {
       return false;
     }

@@ -76,7 +76,7 @@ export async function handleAgentSelect(ctx: Context): Promise<boolean> {
     );
     const displayName = getAgentDisplayName(agentName);
 
-    clearActiveInlineMenu("agent_selected");
+    clearActiveInlineMenu("agent_selected", ctx);
 
     // Send confirmation message with updated keyboard
     await ctx.answerCallbackQuery({ text: t("agent.changed_callback", { name: displayName }) });
@@ -90,7 +90,7 @@ export async function handleAgentSelect(ctx: Context): Promise<boolean> {
 
     return true;
   } catch (err) {
-    clearActiveInlineMenu("agent_select_error");
+    clearActiveInlineMenu("agent_select_error", ctx);
     logger.error("[AgentHandler] Error handling agent select:", err);
     await ctx.answerCallbackQuery({ text: t("agent.change_error_callback") }).catch(() => {});
     return false;

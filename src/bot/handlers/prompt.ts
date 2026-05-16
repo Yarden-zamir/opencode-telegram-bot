@@ -593,8 +593,8 @@ export async function processUserPrompt(
       assistantRunState.clearRun(currentSession.id, "session_prompt_handler_error");
     }
     logger.error("Error in prompt handler:", err);
-    if (interactionManager.getSnapshot()) {
-      clearAllInteractionState("message_handler_error");
+    if (interactionManager.getSnapshot(scopeKey)) {
+      clearAllInteractionState("message_handler_error", scopeKey);
     }
     await ctx.reply(t("error.generic"));
     return false;

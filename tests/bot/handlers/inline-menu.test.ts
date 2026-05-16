@@ -18,6 +18,19 @@ function createReplyContext(messageId: number = 1): Context {
   } as unknown as Context;
 }
 
+function createForumReplyContext(messageId: number = 1, threadId?: number): Context {
+  return {
+    chat: { id: -100123, type: "supergroup", is_forum: true },
+    message: {
+      text: "/sessions",
+      ...(threadId ? { message_thread_id: threadId, is_topic_message: true } : {}),
+    } as Context["message"],
+    reply: vi.fn().mockResolvedValue({ message_id: messageId }),
+    answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+    deleteMessage: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Context;
+}
+
 function createCallbackContext(data: string, messageId: number): Context {
   return {
     callbackQuery: {
@@ -44,6 +57,8 @@ function getCallbackData(button: unknown): string | undefined {
 describe("bot/handlers/inline-menu", () => {
   beforeEach(() => {
     interactionManager.clear("test_setup");
+    interactionManager.clear("test_setup", "chat:-100123");
+    interactionManager.clear("test_setup", "-100123:42");
   });
 
   it("adds unified cancel button to inline keyboard", () => {
@@ -90,6 +105,20 @@ describe("bot/handlers/inline-menu", () => {
     expect(state?.expectedInput).toBe("callback");
     expect(state?.metadata.menuKind).toBe("model");
     expect(state?.metadata.messageId).toBe(42);
+  });
+
+  it("registers inline menu state in the current forum scope", async () => {
+    const ctx = createForumReplyContext(42);
+    const keyboard = new InlineKeyboard().text("Session A", "session:a");
+
+    await replyWithInlineMenu(ctx, {
+      menuKind: "session",
+      text: "Select session",
+      keyboard,
+    });
+
+    expect(interactionManager.getSnapshot()).toBeNull();
+    expect(interactionManager.getSnapshot("chat:-100123")?.metadata.messageId).toBe(42);
   });
 
   it("accepts callback from active inline menu", async () => {

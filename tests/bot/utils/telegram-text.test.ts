@@ -229,6 +229,28 @@ describe("bot/utils/telegram-text", () => {
     });
   });
 
+  it("does not immediately retry rendered entity sends in raw mode after Telegram rate limits", async () => {
+    const rateLimitError = new Error(
+      "Call to 'sendMessage' failed! (429: Too Many Requests: retry after 2)",
+    );
+    const sendMessage = vi.fn().mockRejectedValueOnce(rateLimitError);
+
+    await expect(
+      sendRenderedBotPart({
+        api: { sendMessage },
+        chatId: 100,
+        part: {
+          text: "Hello",
+          entities: [{ type: "bold", offset: 0, length: 5 }],
+          fallbackText: "Hello raw",
+          source: "entities",
+        },
+      }),
+    ).rejects.toBe(rateLimitError);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("edits rendered parts with entities and raw fallback", async () => {
     const editMessageText = vi
       .fn()
@@ -289,5 +311,28 @@ describe("bot/utils/telegram-text", () => {
     expect(editMessageText).toHaveBeenNthCalledWith(2, 100, 500, "Hello raw", {
       reply_markup: { inline_keyboard: [] },
     });
+  });
+
+  it("does not immediately retry rendered entity edits in raw mode after Telegram rate limits", async () => {
+    const rateLimitError = new Error(
+      "Call to 'editMessageText' failed! (429: Too Many Requests: retry after 2)",
+    );
+    const editMessageText = vi.fn().mockRejectedValueOnce(rateLimitError);
+
+    await expect(
+      editRenderedBotPart({
+        api: { editMessageText },
+        chatId: 100,
+        messageId: 500,
+        part: {
+          text: "Hello",
+          entities: [{ type: "italic", offset: 0, length: 5 }],
+          fallbackText: "Hello raw",
+          source: "entities",
+        },
+      }),
+    ).rejects.toBe(rateLimitError);
+
+    expect(editMessageText).toHaveBeenCalledTimes(1);
   });
 });

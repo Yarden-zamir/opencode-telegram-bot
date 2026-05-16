@@ -40,7 +40,7 @@ function getPerChatIntervalMs(job: QueueJob): number {
 }
 
 function countsTowardsGroupWindow(job: QueueJob): boolean {
-  return !isEditMessageJob(job);
+  return RATE_LIMITED_METHODS.has(job.method);
 }
 
 function parseMessageId(payload: unknown): number | null {

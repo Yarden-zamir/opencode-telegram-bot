@@ -170,6 +170,53 @@ describe("bot/telegram-rate-limiter", () => {
     vi.useRealTimers();
   });
 
+  it("counts group edits toward the group flood window", async () => {
+    vi.useFakeTimers();
+
+    const limiter = new TelegramRateLimiter();
+    const executionOrder: string[] = [];
+    const editJobs: Array<Promise<string>> = [];
+
+    for (let index = 0; index < 20; index++) {
+      editJobs.push(
+        limiter.enqueue(
+          "editMessageText",
+          {
+            chat_id: -1001,
+            message_thread_id: 77,
+            message_id: index + 1,
+          },
+          async () => {
+            executionOrder.push(`edit-${index}`);
+            return `edit-${index}-ok`;
+          },
+        ),
+      );
+    }
+
+    const finalSend = limiter.enqueue(
+      "sendMessage",
+      {
+        chat_id: -1001,
+        message_thread_id: 77,
+      },
+      async () => {
+        executionOrder.push("final-send");
+        return "final-ok";
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(executionOrder).not.toContain("final-send");
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(finalSend).resolves.toBe("final-ok");
+    await Promise.all(editJobs);
+    expect(executionOrder).toContain("final-send");
+
+    vi.useRealTimers();
+  });
+
   it("retries retry_after for non-queued Telegram methods too", async () => {
     vi.useFakeTimers();
 

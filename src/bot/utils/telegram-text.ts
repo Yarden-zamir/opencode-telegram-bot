@@ -5,6 +5,7 @@ import {
   sendMessageWithMarkdownFallback,
 } from "./send-with-markdown-fallback.js";
 import type { TelegramRenderedPart } from "../../telegram/render/types.js";
+import { getTelegramRetryAfterMs } from "../../utils/telegram-rate-limit-retry.js";
 
 type SendMessageApi = Pick<Api<RawApi>, "sendMessage">;
 type EditMessageApi = Pick<Api<RawApi>, "editMessageText">;
@@ -142,6 +143,10 @@ export async function sendRenderedBotPart({
       deliveredSignature: getTelegramRenderedPartSignature(part),
     };
   } catch (error) {
+    if (getTelegramRetryAfterMs(error) !== null) {
+      throw error;
+    }
+
     logger.warn(
       "[Bot] Entity payload send failed, retrying assistant message part in raw mode",
       error,
@@ -191,6 +196,10 @@ export async function editRenderedBotPart({
       deliveredSignature: getTelegramRenderedPartSignature(part),
     };
   } catch (error) {
+    if (getTelegramRetryAfterMs(error) !== null) {
+      throw error;
+    }
+
     logger.warn("[Bot] Entity payload edit failed, retrying assistant edit part in raw mode", error);
     await api.editMessageText(chatId, messageId, part.fallbackText, rawOptions);
     logger.debug("[Bot] Assistant edit part applied in raw fallback mode", {

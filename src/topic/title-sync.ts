@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger.js";
+import { getTelegramRetryAfterMs } from "../utils/telegram-rate-limit-retry.js";
 import { getTopicBindingBySessionId, updateTopicBindingNameBySessionId } from "./manager.js";
 import { formatTopicTitle } from "./title-format.js";
 
@@ -12,20 +13,6 @@ interface TopicEditApi {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function getTelegramRetryAfterMs(error: unknown): number | null {
-  if (!error || typeof error !== "object") {
-    return null;
-  }
-
-  const parameters = Reflect.get(error, "parameters");
-  if (!parameters || typeof parameters !== "object") {
-    return null;
-  }
-
-  const retryAfter = Reflect.get(parameters, "retry_after");
-  return typeof retryAfter === "number" && retryAfter > 0 ? retryAfter * 1000 : null;
 }
 
 export async function syncTopicTitleForSession(

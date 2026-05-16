@@ -18,6 +18,8 @@ import { isExpectedOpencodeUnavailableError } from "../utils/opencode-error.js";
 interface EnsureAttachPinnedSessionParams {
   api: Context["api"];
   chatId: number;
+  threadId?: number | null;
+  scopeKey?: string;
   session: SessionInfo;
   forceFullRestore?: boolean;
 }
@@ -25,6 +27,8 @@ interface EnsureAttachPinnedSessionParams {
 export interface AttachSessionDeps {
   bot: Bot<Context>;
   chatId: number;
+  threadId?: number | null;
+  scopeKey?: string;
   session: SessionInfo;
   ensureEventSubscription: (directory: string) => Promise<void>;
   forceFullRestore?: boolean;
@@ -40,6 +44,8 @@ export interface AttachSessionResult {
 export interface RestoreAttachedCurrentSessionDeps {
   bot: Bot<Context>;
   chatId: number;
+  threadId?: number | null;
+  scopeKey?: string;
   ensureEventSubscription: (directory: string) => Promise<void>;
   forceFullRestore?: boolean;
 }
@@ -56,49 +62,81 @@ function getAttachBusyStatus(sessionId: string, statuses: unknown): boolean {
 async function ensureAttachPinnedSession({
   api,
   chatId,
+  threadId = null,
+  scopeKey,
   session,
   forceFullRestore = false,
 }: EnsureAttachPinnedSessionParams): Promise<void> {
-  if (!pinnedMessageManager.isInitialized()) {
-    pinnedMessageManager.initialize(api, chatId);
+  if (!pinnedMessageManager.isInitialized(scopeKey)) {
+    if (scopeKey || threadId !== null) {
+      pinnedMessageManager.initialize(api, chatId, scopeKey, threadId);
+    } else {
+      pinnedMessageManager.initialize(api, chatId);
+    }
   }
 
-  keyboardManager.initialize(api, chatId);
+  if (scopeKey) {
+    keyboardManager.initialize(api, chatId, scopeKey);
+  } else {
+    keyboardManager.initialize(api, chatId);
+  }
 
-  const pinnedState = pinnedMessageManager.getState();
+  const pinnedState = pinnedMessageManager.getState(scopeKey);
   if (pinnedState.sessionId === session.id && pinnedState.messageId) {
     if (forceFullRestore) {
-      await pinnedMessageManager.loadContextFromHistory(session.id, session.directory);
+      if (scopeKey) {
+        await pinnedMessageManager.loadContextFromHistory(session.id, session.directory, scopeKey);
+      } else {
+        await pinnedMessageManager.loadContextFromHistory(session.id, session.directory);
+      }
     }
     return;
   }
 
   if (pinnedState.messageId && pinnedState.sessionId === null) {
-    await pinnedMessageManager.restoreExistingSession(session.id, session.title);
+    if (scopeKey) {
+      await pinnedMessageManager.restoreExistingSession(session.id, session.title, scopeKey);
+    } else {
+      await pinnedMessageManager.restoreExistingSession(session.id, session.title);
+    }
   } else {
-    await pinnedMessageManager.onSessionChange(session.id, session.title);
+    if (scopeKey) {
+      await pinnedMessageManager.onSessionChange(session.id, session.title, scopeKey);
+    } else {
+      await pinnedMessageManager.onSessionChange(session.id, session.title);
+    }
   }
 
-  await pinnedMessageManager.loadContextFromHistory(session.id, session.directory);
+  if (scopeKey) {
+    await pinnedMessageManager.loadContextFromHistory(session.id, session.directory, scopeKey);
+  } else {
+    await pinnedMessageManager.loadContextFromHistory(session.id, session.directory);
+  }
 
-  const contextInfo = pinnedMessageManager.getContextInfo();
+  const contextInfo = pinnedMessageManager.getContextInfo(scopeKey);
   if (contextInfo) {
-    keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
+    keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit, scopeKey);
   }
 }
 
-async function syncPinnedAttachState(): Promise<void> {
-  if (!pinnedMessageManager.isInitialized()) {
+async function syncPinnedAttachState(scopeKey?: string): Promise<void> {
+  if (!pinnedMessageManager.isInitialized(scopeKey)) {
     return;
   }
 
   const attached = attachManager.getSnapshot();
-  await pinnedMessageManager.setAttachState(attached !== null, attached?.busy ?? false);
+  if (scopeKey) {
+    await pinnedMessageManager.setAttachState(attached !== null, attached?.busy ?? false, scopeKey);
+  } else {
+    await pinnedMessageManager.setAttachState(attached !== null, attached?.busy ?? false);
+  }
 }
 
 async function restorePendingQuestion(
   bot: Bot<Context>,
   chatId: number,
+  threadId: number | null,
+  scopeKey: string | undefined,
   sessionId: string,
   directory: string,
 ): Promise<boolean> {
@@ -120,14 +158,16 @@ async function restorePendingQuestion(
     return false;
   }
 
-  questionManager.startQuestions(pendingQuestion.questions, pendingQuestion.id);
-  await showCurrentQuestion(bot.api, chatId);
+  questionManager.startQuestions(pendingQuestion.questions, pendingQuestion.id, scopeKey);
+  await showCurrentQuestion(bot.api, chatId, scopeKey, threadId);
   return true;
 }
 
 async function restorePendingPermissions(
   bot: Bot<Context>,
   chatId: number,
+  threadId: number | null,
+  scopeKey: string | undefined,
   sessionId: string,
   directory: string,
 ): Promise<number> {
@@ -146,19 +186,21 @@ async function restorePendingPermissions(
 
   const pendingPermissions = data.filter((request) => request.sessionID === sessionId);
   for (const request of pendingPermissions) {
-    await showPermissionRequest(bot.api, chatId, request);
+    await showPermissionRequest(bot.api, chatId, request, scopeKey, threadId);
   }
 
   return pendingPermissions.length;
 }
 
 export async function attachToSession(deps: AttachSessionDeps): Promise<AttachSessionResult> {
-  const { bot, chatId, session, ensureEventSubscription, forceFullRestore = false } = deps;
+  const { bot, chatId, threadId = null, scopeKey, session, ensureEventSubscription, forceFullRestore = false } = deps;
   const alreadyAttached = attachManager.isAttachedSession(session.id, session.directory);
 
   await ensureAttachPinnedSession({
     api: bot.api,
     chatId,
+    threadId,
+    scopeKey,
     session,
     forceFullRestore,
   });
@@ -192,22 +234,31 @@ export async function attachToSession(deps: AttachSessionDeps): Promise<AttachSe
     attachManager.markIdle(session.id);
   }
 
-  await syncPinnedAttachState();
+  await syncPinnedAttachState(scopeKey);
 
   let restoredQuestion = false;
   let restoredPermissions = 0;
 
   if (
     (!alreadyAttached || forceFullRestore) &&
-    !questionManager.isActive() &&
-    !permissionManager.isActive()
+    !questionManager.isActive(scopeKey) &&
+    !permissionManager.isActive(scopeKey)
   ) {
-    restoredQuestion = await restorePendingQuestion(bot, chatId, session.id, session.directory);
+    restoredQuestion = await restorePendingQuestion(
+      bot,
+      chatId,
+      threadId,
+      scopeKey,
+      session.id,
+      session.directory,
+    );
 
     if (!restoredQuestion) {
       restoredPermissions = await restorePendingPermissions(
         bot,
         chatId,
+        threadId,
+        scopeKey,
         session.id,
         session.directory,
       );
@@ -225,8 +276,8 @@ export async function attachToSession(deps: AttachSessionDeps): Promise<AttachSe
 export async function restoreAttachedCurrentSession(
   deps: RestoreAttachedCurrentSessionDeps,
 ): Promise<boolean> {
-  const currentProject = getCurrentProject();
-  const currentSession = getCurrentSession();
+  const currentProject = getCurrentProject(deps.scopeKey);
+  const currentSession = getCurrentSession(deps.scopeKey);
 
   if (!currentProject || !currentSession) {
     return false;
@@ -250,6 +301,8 @@ export async function restoreAttachedCurrentSession(
     await attachToSession({
       bot: deps.bot,
       chatId: deps.chatId,
+      threadId: deps.threadId,
+      scopeKey: deps.scopeKey,
       session: currentSession,
       ensureEventSubscription: deps.ensureEventSubscription,
       forceFullRestore: deps.forceFullRestore,

@@ -6,6 +6,7 @@ export const fr: I18nDictionary = {
   "cmd.description.stop": "Arrêter l'action en cours",
   "cmd.description.detach": "Se détacher de la session actuelle",
   "cmd.description.sessions": "Lister les sessions",
+  "cmd.description.last": "Afficher la dernière réponse de session",
   "cmd.description.tts": "Basculer les réponses audio",
   "cmd.description.projects": "Lister les projets",
   "cmd.description.worktree": "Changer de worktree git",
@@ -71,13 +72,21 @@ export const fr: I18nDictionary = {
   "bot.session_created": "✅ Session créée : {title}",
   "bot.session_busy":
     "⏳ L'agent exécute déjà une tâche. Attendez la fin ou utilisez /abort pour interrompre l'exécution en cours.",
+  "bot.session_queued":
+    "📝 Votre message a été mis en file d'attente pour cette session.\n\nPosition dans la file : {position}\nEnsuite : il démarrera automatiquement à la fin de l'exécution en cours.",
+  "bot.session_queue_started":
+    "▶️ Démarrage du prochain message en file d'attente pour cette session.\n\nMessage en file d'attente :\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ La session active ne correspond pas au projet sélectionné, elle a donc été réinitialisée. Utilisez /sessions pour en choisir une ou /new pour créer une nouvelle session.",
   "bot.prompt_send_error": "Impossible d'envoyer la requête à OpenCode.",
+  "bot.prompt_send_error_session_not_found":
+    "Impossible d'envoyer la requête car la session OpenCode n'existe plus. Utilisez /sessions ou /new pour continuer.",
   "bot.session_error": "🔴 OpenCode a renvoyé une erreur : {message}",
   "bot.session_retry":
     "🔁 {message}\n\nLe fournisseur renvoie la même erreur à chaque nouvelle tentative. Utilisez /abort pour arrêter.",
   "bot.external_user_input": "Entrée utilisateur externe",
+  "topic.unbound":
+    "⚠️ Ce sujet n'est lié à aucune session. Allez dans le sujet General et lancez /new.",
   "background.session_fallback": "session {id}",
   "background.assistant_response":
     "🔔 L'assistant a répondu dans une session en arrière-plan : {session}",
@@ -160,11 +169,19 @@ export const fr: I18nDictionary = {
   "sessions.button.next_page": "Suiv. ➡️",
   "sessions.loading_context": "⏳ Chargement du contexte et des derniers messages...",
   "sessions.selected": "✅ Session sélectionnée : {title}",
+  "sessions.bound_topic_link":
+    "Session already has a topic: {title}\nTopic: {topic}\n{url}",
+  "sessions.created_topic_link": "Created topic for session: {title}\nTopic: {topic}\n{url}",
   "sessions.select_error": "🔴 Impossible de sélectionner la session.",
   "sessions.preview.empty": "Aucun message récent.",
   "sessions.preview.title": "Messages récents :",
   "sessions.preview.you": "Vous :",
   "sessions.preview.agent": "Agent :",
+
+  "last.title": "Dernier message",
+  "last.session_not_selected": "💬 Aucune session sélectionnée. Choisissez-en une avec /sessions.",
+  "last.empty": "Aucun message récent.",
+  "last.fetch_error": "🔴 Impossible de charger le dernier message de la session.",
 
   "attach.project_not_selected":
     "🏗 Aucun projet sélectionné.\n\nSélectionnez d'abord un projet avec /projects.",
@@ -194,6 +211,13 @@ export const fr: I18nDictionary = {
   "new.created": "✅ Nouvelle session créée : {title}",
   "new.create_error":
     "🔴 Le serveur OpenCode est indisponible ou une erreur s'est produite lors de la création de la session.",
+  "new.topic_only_in_general": "Create new forum-topic sessions from the General topic.",
+  "new.topic_create_error": "🔴 Failed to create the session topic.",
+  "new.topic_create_no_rights":
+    "🔴 I do not have permission to create forum topics in this group.",
+  "new.topic_created": "✅ Session topic ready: {title}",
+  "new.general_created": "✅ New session topic created.",
+  "new.general_open_link": "Open it here: {url}",
 
   "stop.no_active_session":
     "🛑 L'agent n'a pas été démarré\n\nCréez une session avec /new ou sélectionnez-en une via /sessions.",
@@ -429,6 +453,11 @@ export const fr: I18nDictionary = {
   "task.prompt_empty": "⚠️ Le texte de la tâche ne peut pas être vide.",
   "task.created":
     "✅ Tâche planifiée créée\n\nTâche : {description}\nProjet : {project}\nModèle : {model}\nPlanning : {schedule}\n{cronLine}Prochaine exécution : {nextRunAt}",
+  "task.created_topic_link": "Sujet de sortie des tâches planifiées : {url}",
+  "task.output_topic_commands_only":
+    "Ce sujet est réservé aux sorties des tâches planifiées. Utilisez le chat principal pour les commandes du bot.",
+  "task.output_topic_blocked":
+    "Ce sujet est réservé aux sorties des tâches planifiées. Allez dans le sujet de contrôle de session pour démarrer ou continuer une session de code.",
   "task.created.cron": "Cron : {cron}",
   "task.button.retry_schedule": "🔁 Ressaisir le planning",
   "task.button.cancel": "❌ Annuler",

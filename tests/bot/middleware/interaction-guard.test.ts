@@ -264,7 +264,7 @@ describe("interactionGuardMiddleware", () => {
     expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_busy"));
   });
 
-  it("blocks plain text while busy with generic blocked message", async () => {
+  it("allows plain text while busy so prompt handler can queue it", async () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
 
     const ctx = createTextContext("hello");
@@ -272,8 +272,8 @@ describe("interactionGuardMiddleware", () => {
 
     await interactionGuardMiddleware(ctx, next);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(ctx.reply).toHaveBeenCalledWith(t("bot.session_busy"));
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(ctx.reply).not.toHaveBeenCalled();
   });
 
   it("blocks callback while busy without active question or permission", async () => {

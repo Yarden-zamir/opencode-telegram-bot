@@ -20,143 +20,230 @@ import {
   formatCostLine,
   formatModelDisplayName,
 } from "./format.js";
+import { GLOBAL_SCOPE_KEY, getMessageThreadId, getOptionalThreadSendOptions } from "../bot/scope.js";
+
+interface PinnedScopeContext {
+  api: Api | null;
+  chatId: number | null;
+  threadId: number | null;
+  state: PinnedMessageState;
+  contextLimit: number | null;
+  updateDebounceTimer: ReturnType<typeof setTimeout> | null;
+  updateTask: Promise<void> | null;
+  pendingUpdate: boolean;
+  pendingForceUpdate: boolean;
+  lastRenderedMessageText: string | null;
+}
 
 class PinnedMessageManager {
-  private api: Api | null = null;
-  private chatId: number | null = null;
-  private state: PinnedMessageState = {
-    messageId: null,
-    chatId: null,
-    sessionId: null,
-    sessionTitle: t("pinned.default_session_title"),
-    attachActive: false,
-    attachBusy: false,
-    projectPath: "",
-    projectBranch: null,
-    projectWorktreePath: null,
-    tokensUsed: 0,
-    tokensLimit: 0,
-    lastUpdated: 0,
-    changedFiles: [],
-    cost: 0,
-  };
-  private contextLimit: number | null = null;
-  private onKeyboardUpdateCallback?: (tokensUsed: number, tokensLimit: number) => void;
-  private updateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private updateTask: Promise<void> | null = null;
-  private pendingUpdate = false;
-  private pendingForceUpdate = false;
-  private lastRenderedMessageText: string | null = null;
+  private contexts = new Map<string, PinnedScopeContext>();
+  private onKeyboardUpdateCallback?: (
+    tokensUsed: number,
+    tokensLimit: number,
+    scopeKey?: string,
+  ) => void;
+
+  private createDefaultState(): PinnedMessageState {
+    return {
+      messageId: null,
+      chatId: null,
+      threadId: null,
+      sessionId: null,
+      sessionTitle: t("pinned.default_session_title"),
+      attachActive: false,
+      attachBusy: false,
+      projectPath: "",
+      projectBranch: null,
+      projectWorktreePath: null,
+      tokensUsed: 0,
+      tokensLimit: 0,
+      lastUpdated: 0,
+      changedFiles: [],
+      cost: 0,
+    };
+  }
+
+  private normalizeScopeKey(scopeKey?: string): string {
+    return scopeKey ?? GLOBAL_SCOPE_KEY;
+  }
+
+  private getContext(scopeKey?: string): PinnedScopeContext {
+    const normalizedScopeKey = this.normalizeScopeKey(scopeKey);
+    const existing = this.contexts.get(normalizedScopeKey);
+    if (existing) {
+      return existing;
+    }
+
+    const savedMessageId = getPinnedMessageId(normalizedScopeKey);
+    const context: PinnedScopeContext = {
+      api: null,
+      chatId: null,
+      threadId: null,
+      state: {
+        ...this.createDefaultState(),
+        messageId: savedMessageId ?? null,
+      },
+      contextLimit: null,
+      updateDebounceTimer: null,
+      updateTask: null,
+      pendingUpdate: false,
+      pendingForceUpdate: false,
+      lastRenderedMessageText: null,
+    };
+    this.contexts.set(normalizedScopeKey, context);
+    return context;
+  }
+
+  private resetContextState(context: PinnedScopeContext): void {
+    context.state = {
+      ...this.createDefaultState(),
+      chatId: context.chatId,
+      threadId: context.threadId,
+    };
+    context.lastRenderedMessageText = null;
+    context.pendingUpdate = false;
+    context.pendingForceUpdate = false;
+  }
+
+  private emitKeyboardUpdate(tokensUsed: number, tokensLimit: number, scopeKey?: string): void {
+    if (!this.onKeyboardUpdateCallback) {
+      return;
+    }
+
+    if (scopeKey) {
+      this.onKeyboardUpdateCallback(tokensUsed, tokensLimit, scopeKey);
+    } else {
+      this.onKeyboardUpdateCallback(tokensUsed, tokensLimit);
+    }
+  }
 
   /**
    * Initialize manager with bot API and chat ID
    */
-  initialize(api: Api, chatId: number): void {
-    this.api = api;
-    this.chatId = chatId;
+  initialize(api: Api, chatId: number, scopeKey?: string, threadId?: number | null): void {
+    const context = this.getContext(scopeKey);
+    const messageThreadId = getMessageThreadId(threadId ?? null);
+    context.api = api;
+    context.chatId = chatId;
+    context.threadId = messageThreadId;
+    context.state.chatId = chatId;
+    context.state.threadId = messageThreadId;
 
-    // Restore pinned message ID from settings
-    const savedMessageId = getPinnedMessageId();
+    const savedMessageId = getPinnedMessageId(this.normalizeScopeKey(scopeKey));
     if (savedMessageId) {
-      this.state.messageId = savedMessageId;
-      this.state.chatId = chatId;
+      context.state.messageId = savedMessageId;
     }
   }
 
   /**
    * Called when session changes - create new pinned message
    */
-  async onSessionChange(sessionId: string, sessionTitle: string): Promise<void> {
+  async onSessionChange(sessionId: string, sessionTitle: string, scopeKey?: string): Promise<void> {
     logger.info(`[PinnedManager] Session changed: ${sessionId}, title: ${sessionTitle}`);
+    const context = this.getContext(scopeKey);
+    const state = context.state;
 
     // Reset tokens for new session
-    this.state.tokensUsed = 0;
-    this.state.cost = 0;
+    state.tokensUsed = 0;
+    state.cost = 0;
 
     // Update state
-    this.state.sessionId = sessionId;
-    this.state.sessionTitle = sessionTitle || t("pinned.default_session_title");
-    this.state.attachActive = false;
-    this.state.attachBusy = false;
+    state.sessionId = sessionId;
+    state.sessionTitle = sessionTitle || t("pinned.default_session_title");
+    state.attachActive = false;
+    state.attachBusy = false;
 
-    await this.refreshProjectMetadata();
+    await this.refreshProjectMetadata(scopeKey);
 
     // Fetch context limit for current model
-    await this.fetchContextLimit();
+    await this.fetchContextLimit(scopeKey);
 
     // Trigger keyboard update callback with reset context (0 tokens)
-    if (this.onKeyboardUpdateCallback && this.state.tokensLimit > 0) {
-      this.onKeyboardUpdateCallback(this.state.tokensUsed, this.state.tokensLimit);
+    if (this.onKeyboardUpdateCallback && state.tokensLimit > 0) {
+      this.emitKeyboardUpdate(state.tokensUsed, state.tokensLimit, scopeKey);
     }
 
     // Reset changed files for new session
-    this.state.changedFiles = [];
-    this.lastRenderedMessageText = null;
-    this.pendingUpdate = false;
-    this.pendingForceUpdate = false;
+    state.changedFiles = [];
+    context.lastRenderedMessageText = null;
+    context.pendingUpdate = false;
+    context.pendingForceUpdate = false;
 
     // Unpin old message and create new one
-    await this.unpinOldMessage();
-    await this.createPinnedMessage();
+    await this.unpinOldMessage(scopeKey);
+    await this.createPinnedMessage(scopeKey);
 
     // Load existing diffs from API (for session restoration)
-    await this.loadDiffsFromApi(sessionId);
+    await this.loadDiffsFromApi(sessionId, scopeKey);
   }
 
   /**
    * Restore in-memory state for a persisted pinned message without creating a new Telegram message.
    */
-  async restoreExistingSession(sessionId: string, sessionTitle: string): Promise<void> {
+  async restoreExistingSession(
+    sessionId: string,
+    sessionTitle: string,
+    scopeKey?: string,
+  ): Promise<void> {
     logger.info(`[PinnedManager] Restoring existing pinned message for session: ${sessionId}`);
+    const context = this.getContext(scopeKey);
+    const state = context.state;
 
-    this.state.sessionId = sessionId;
-    this.state.sessionTitle = sessionTitle || t("pinned.default_session_title");
-    this.state.attachActive = false;
-    this.state.attachBusy = false;
-    this.state.changedFiles = [];
-    this.lastRenderedMessageText = null;
-    this.pendingUpdate = false;
-    this.pendingForceUpdate = false;
+    state.sessionId = sessionId;
+    state.sessionTitle = sessionTitle || t("pinned.default_session_title");
+    state.attachActive = false;
+    state.attachBusy = false;
+    state.changedFiles = [];
+    context.lastRenderedMessageText = null;
+    context.pendingUpdate = false;
+    context.pendingForceUpdate = false;
 
-    await this.refreshProjectMetadata();
-    await this.fetchContextLimit();
+    await this.refreshProjectMetadata(scopeKey);
+    await this.fetchContextLimit(scopeKey);
 
-    if (this.onKeyboardUpdateCallback && this.state.tokensLimit > 0) {
-      this.onKeyboardUpdateCallback(this.state.tokensUsed, this.state.tokensLimit);
+    if (this.onKeyboardUpdateCallback && state.tokensLimit > 0) {
+      this.emitKeyboardUpdate(state.tokensUsed, state.tokensLimit, scopeKey);
     }
 
-    await this.updatePinnedMessage(true);
-    await this.loadDiffsFromApi(sessionId);
+    await this.updatePinnedMessage(scopeKey, true);
+    await this.loadDiffsFromApi(sessionId, scopeKey);
   }
 
   /**
    * Called when session title is updated (after first message)
    */
-  async onSessionTitleUpdate(newTitle: string): Promise<void> {
-    if (this.state.sessionTitle !== newTitle && newTitle) {
+  async onSessionTitleUpdate(newTitle: string, scopeKey?: string): Promise<void> {
+    const state = this.getContext(scopeKey).state;
+    if (state.sessionTitle !== newTitle && newTitle) {
       logger.debug(`[PinnedManager] Session title updated: ${newTitle}`);
-      this.state.sessionTitle = newTitle;
-      await this.updatePinnedMessage();
+      state.sessionTitle = newTitle;
+      await this.updatePinnedMessage(scopeKey);
     }
   }
 
-  async setAttachState(active: boolean, busy: boolean): Promise<void> {
+  async setAttachState(active: boolean, busy: boolean, scopeKey?: string): Promise<void> {
+    const state = this.getContext(scopeKey).state;
     const nextBusy = active ? busy : false;
-    if (this.state.attachActive === active && this.state.attachBusy === nextBusy) {
+    if (state.attachActive === active && state.attachBusy === nextBusy) {
       return;
     }
 
-    this.state.attachActive = active;
-    this.state.attachBusy = nextBusy;
-    await this.updatePinnedMessage();
+    state.attachActive = active;
+    state.attachBusy = nextBusy;
+    await this.updatePinnedMessage(scopeKey);
   }
 
   /**
    * Load context token usage from session history
    */
-  async loadContextFromHistory(sessionId: string, directory: string): Promise<void> {
+  async loadContextFromHistory(
+    sessionId: string,
+    directory: string,
+    scopeKey?: string,
+  ): Promise<void> {
     try {
       logger.debug(`[PinnedManager] Loading context from history for session: ${sessionId}`);
+      const state = this.getContext(scopeKey).state;
 
       const { data: messagesData, error } = await opencodeClient.session.messages({
         sessionID: sessionId,
@@ -214,15 +301,15 @@ class PinnedMessageManager {
         }
       });
 
-      this.state.tokensUsed = maxContextSize;
-      this.state.cost = totalCost;
-      this.state.sessionId = sessionId;
+      state.tokensUsed = maxContextSize;
+      state.cost = totalCost;
+      state.sessionId = sessionId;
 
       logger.info(
-        `[PinnedManager] Loaded context from history: ${this.state.tokensUsed} tokens, cost: $${this.state.cost.toFixed(2)}`,
+        `[PinnedManager] Loaded context from history: ${state.tokensUsed} tokens, cost: $${state.cost.toFixed(2)}`,
       );
 
-      await this.updatePinnedMessage();
+      await this.updatePinnedMessage(scopeKey);
     } catch (err) {
       if (isExpectedOpencodeUnavailableError(err)) {
         logger.warn("[PinnedManager] OpenCode server unavailable; skipping session history load");
@@ -235,35 +322,36 @@ class PinnedMessageManager {
   /**
    * Called when session is compacted - reload context from history
    */
-  async onSessionCompacted(sessionId: string, directory: string): Promise<void> {
+  async onSessionCompacted(sessionId: string, directory: string, scopeKey?: string): Promise<void> {
     logger.info(`[PinnedManager] Session compacted, reloading context: ${sessionId}`);
 
     // Reload context from updated history (after compaction)
-    await this.loadContextFromHistory(sessionId, directory);
+    await this.loadContextFromHistory(sessionId, directory, scopeKey);
   }
 
   /**
    * Called when assistant message completes with token info
    */
-  async onMessageComplete(tokens: TokensInfo): Promise<void> {
+  async onMessageComplete(tokens: TokensInfo, scopeKey?: string): Promise<void> {
     // Ensure context limit is available even if session was restored
     // without a fresh onSessionChange call (for example after /abort + continue).
-    if (this.getContextLimit() === 0) {
-      await this.fetchContextLimit();
+    if (this.getContextLimit(scopeKey) === 0) {
+      await this.fetchContextLimit(scopeKey);
     }
+    const state = this.getContext(scopeKey).state;
 
     // Context = input + cache.read (cache.read contains previously cached context)
     // This represents the actual context window usage
-    this.state.tokensUsed = tokens.input + tokens.cacheRead;
+    state.tokensUsed = tokens.input + tokens.cacheRead;
 
     logger.debug(
-      `[PinnedManager] Tokens updated: ${this.state.tokensUsed}/${this.state.tokensLimit}`,
+      `[PinnedManager] Tokens updated: ${state.tokensUsed}/${state.tokensLimit}`,
     );
 
     // Also fetch latest session title (it may have changed after first message)
-    await this.refreshSessionTitle();
+    await this.refreshSessionTitle(scopeKey);
 
-    await this.updatePinnedMessage();
+    await this.updatePinnedMessage(scopeKey);
   }
 
   /**
@@ -271,10 +359,11 @@ class PinnedMessageManager {
    * Used for intermediate (non-completed) message.updated events
    * to keep pinned state in sync with keyboardManager.
    */
-  updateTokensSilent(tokens: TokensInfo): void {
-    this.state.tokensUsed = tokens.input + tokens.cacheRead;
+  updateTokensSilent(tokens: TokensInfo, scopeKey?: string): void {
+    const state = this.getContext(scopeKey).state;
+    state.tokensUsed = tokens.input + tokens.cacheRead;
     logger.debug(
-      `[PinnedManager] Tokens updated (silent): ${this.state.tokensUsed}/${this.state.tokensLimit}`,
+      `[PinnedManager] Tokens updated (silent): ${state.tokensUsed}/${state.tokensLimit}`,
     );
   }
 
@@ -282,54 +371,64 @@ class PinnedMessageManager {
    * Refresh the pinned message with current in-memory state.
    * Used at thinking time to push accumulated silent updates to Telegram.
    */
-  async refresh(): Promise<void> {
-    await this.refreshProjectMetadata();
-    await this.updatePinnedMessage(true);
+  async refresh(scopeKey?: string): Promise<void> {
+    await this.refreshProjectMetadata(scopeKey);
+    await this.updatePinnedMessage(scopeKey, true);
   }
 
   /**
    * Called when cost info is received from SSE events
    */
-  async onCostUpdate(cost: number): Promise<void> {
+  async onCostUpdate(cost: number, scopeKey?: string): Promise<void> {
     if (!Number.isFinite(cost) || cost === 0) {
       logger.debug("[PinnedManager] Ignoring non-impacting cost update");
       return;
     }
 
-    const currentCost = this.state.cost || 0;
-    this.state.cost = currentCost + cost;
+    const state = this.getContext(scopeKey).state;
+    const currentCost = state.cost || 0;
+    state.cost = currentCost + cost;
     logger.debug(
-      `[PinnedManager] Cost added: $${cost.toFixed(2)}, total session: $${(this.state.cost || 0).toFixed(2)}`,
+      `[PinnedManager] Cost added: $${cost.toFixed(2)}, total session: $${(state.cost || 0).toFixed(2)}`,
     );
-    await this.updatePinnedMessage();
+    await this.updatePinnedMessage(scopeKey);
   }
 
   /**
    * Set callback for keyboard updates when context changes
    */
-  setOnKeyboardUpdate(callback: (tokensUsed: number, tokensLimit: number) => void): void {
+  setOnKeyboardUpdate(
+    callback: (tokensUsed: number, tokensLimit: number, scopeKey?: string) => void,
+    scopeKey?: string,
+  ): void {
     this.onKeyboardUpdateCallback = callback;
     logger.debug("[PinnedManager] Keyboard update callback registered");
+    const context = this.getContext(scopeKey);
 
     // Fire immediately with current state to fix race condition:
     // onSessionChange may have already run before this callback was registered.
-    const limit = this.state.tokensLimit > 0 ? this.state.tokensLimit : this.contextLimit || 0;
+    const limit = context.state.tokensLimit > 0 ? context.state.tokensLimit : context.contextLimit || 0;
     if (limit > 0) {
-      callback(this.state.tokensUsed, limit);
+      if (scopeKey) {
+        callback(context.state.tokensUsed, limit, scopeKey);
+      } else {
+        callback(context.state.tokensUsed, limit);
+      }
     }
   }
 
   /**
    * Get current context information
    */
-  getContextInfo(): { tokensUsed: number; tokensLimit: number } | null {
+  getContextInfo(scopeKey?: string): { tokensUsed: number; tokensLimit: number } | null {
     // Use cached contextLimit if tokensLimit is not set yet
-    const limit = this.state.tokensLimit > 0 ? this.state.tokensLimit : this.contextLimit || 0;
+    const context = this.getContext(scopeKey);
+    const limit = context.state.tokensLimit > 0 ? context.state.tokensLimit : context.contextLimit || 0;
     if (limit === 0) {
       return null;
     }
     return {
-      tokensUsed: this.state.tokensUsed,
+      tokensUsed: context.state.tokensUsed,
       tokensLimit: limit,
     };
   }
@@ -338,63 +437,67 @@ class PinnedMessageManager {
    * Get context limit (for keyboard display when no session)
    * Returns cached limit or 0 if not available
    */
-  getContextLimit(): number {
-    return this.contextLimit || this.state.tokensLimit || 0;
+  getContextLimit(scopeKey?: string): number {
+    const context = this.getContext(scopeKey);
+    return context.contextLimit || context.state.tokensLimit || 0;
   }
 
   /**
    * Refresh context limit for current model (call after model change)
    */
-  async refreshContextLimit(): Promise<void> {
-    await this.fetchContextLimit();
+  async refreshContextLimit(scopeKey?: string): Promise<void> {
+    await this.fetchContextLimit(scopeKey);
   }
 
   /**
    * Called when session.diff SSE event is received.
    * Only overwrites if non-empty (API may return empty while tool events collected data).
    */
-  async onSessionDiff(diffs: FileChange[]): Promise<void> {
-    if (diffs.length === 0 && this.state.changedFiles.length > 0) {
+  async onSessionDiff(diffs: FileChange[], scopeKey?: string): Promise<void> {
+    const state = this.getContext(scopeKey).state;
+    if (diffs.length === 0 && state.changedFiles.length > 0) {
       logger.debug("[PinnedManager] Ignoring empty session.diff, keeping tool-collected data");
       return;
     }
 
-    if (this.areFileDiffsEqual(this.state.changedFiles, diffs)) {
+    if (this.areFileDiffsEqual(state.changedFiles, diffs)) {
       logger.debug("[PinnedManager] Ignoring unchanged session.diff");
       return;
     }
 
-    this.state.changedFiles = diffs;
+    state.changedFiles = diffs;
     logger.debug(`[PinnedManager] Session diff updated: ${diffs.length} files`);
-    await this.updatePinnedMessage();
+    await this.updatePinnedMessage(scopeKey);
   }
 
   /**
    * Called when a single file is changed (from tool events: edit/write)
    */
-  addFileChange(change: FileChange): void {
-    const existing = this.state.changedFiles.find((f) => f.file === change.file);
+  addFileChange(change: FileChange, scopeKey?: string): void {
+    const state = this.getContext(scopeKey).state;
+    const existing = state.changedFiles.find((f) => f.file === change.file);
     if (existing) {
       existing.additions += change.additions;
       existing.deletions += change.deletions;
     } else {
-      this.state.changedFiles.push(change);
+      state.changedFiles.push(change);
     }
     logger.debug(
-      `[PinnedManager] File change added: ${change.file} (+${change.additions} -${change.deletions}), total: ${this.state.changedFiles.length}`,
+      `[PinnedManager] File change added: ${change.file} (+${change.additions} -${change.deletions}), total: ${state.changedFiles.length}`,
     );
 
     // Schedule debounced update (avoid spamming Telegram API on rapid tool events)
-    this.scheduleDebouncedUpdate();
+    this.scheduleDebouncedUpdate(scopeKey);
   }
 
-  private scheduleDebouncedUpdate(): void {
-    if (this.updateDebounceTimer) {
-      clearTimeout(this.updateDebounceTimer);
+  private scheduleDebouncedUpdate(scopeKey?: string): void {
+    const context = this.getContext(scopeKey);
+    if (context.updateDebounceTimer) {
+      clearTimeout(context.updateDebounceTimer);
     }
-    this.updateDebounceTimer = setTimeout(() => {
-      this.updateDebounceTimer = null;
-      void this.updatePinnedMessage();
+    context.updateDebounceTimer = setTimeout(() => {
+      context.updateDebounceTimer = null;
+      void this.updatePinnedMessage(scopeKey);
     }, 1000);
   }
 
@@ -402,9 +505,9 @@ class PinnedMessageManager {
    * Load file diffs from API for current session.
    * Tries session.diff() first, falls back to parsing session.messages() tool parts.
    */
-  private async loadDiffsFromApi(sessionId: string): Promise<void> {
+  private async loadDiffsFromApi(sessionId: string, scopeKey?: string): Promise<void> {
     try {
-      const project = getCurrentProject();
+      const project = getCurrentProject(scopeKey);
       if (!project) {
         logger.debug("[PinnedManager] loadDiffsFromApi: no project");
         return;
@@ -423,21 +526,21 @@ class PinnedMessageManager {
       );
 
       if (!error && data && data.length > 0) {
-        this.state.changedFiles = data.map((d) => ({
-          file: d.file,
-          additions: d.additions,
-          deletions: d.deletions,
+          this.getContext(scopeKey).state.changedFiles = data.map((d) => ({
+            file: d.file,
+            additions: d.additions,
+            deletions: d.deletions,
         }));
         logger.info(
-          `[PinnedManager] Loaded ${this.state.changedFiles.length} file diffs from session.diff()`,
-        );
-        await this.updatePinnedMessage();
+            `[PinnedManager] Loaded ${this.getContext(scopeKey).state.changedFiles.length} file diffs from session.diff()`,
+          );
+        await this.updatePinnedMessage(scopeKey);
         return;
       }
 
       // Fallback: parse tool parts from session messages
       logger.debug("[PinnedManager] session.diff() empty, trying loadDiffsFromMessages()");
-      await this.loadDiffsFromMessages(sessionId, project.worktree);
+      await this.loadDiffsFromMessages(sessionId, project.worktree, scopeKey);
     } catch (err) {
       if (isExpectedOpencodeUnavailableError(err)) {
         logger.debug("[PinnedManager] OpenCode server unavailable; skipping diff restore");
@@ -450,7 +553,11 @@ class PinnedMessageManager {
   /**
    * Fallback: extract file changes from session message tool parts
    */
-  private async loadDiffsFromMessages(sessionId: string, directory: string): Promise<void> {
+  private async loadDiffsFromMessages(
+    sessionId: string,
+    directory: string,
+    scopeKey?: string,
+  ): Promise<void> {
     try {
       logger.debug(`[PinnedManager] loadDiffsFromMessages: fetching messages for ${sessionId}`);
 
@@ -550,11 +657,11 @@ class PinnedMessageManager {
       );
 
       if (filesMap.size > 0) {
-        this.state.changedFiles = Array.from(filesMap.values());
+        this.getContext(scopeKey).state.changedFiles = Array.from(filesMap.values());
         logger.info(
-          `[PinnedManager] Loaded ${this.state.changedFiles.length} file diffs from messages`,
+          `[PinnedManager] Loaded ${this.getContext(scopeKey).state.changedFiles.length} file diffs from messages`,
         );
-        await this.updatePinnedMessage();
+        await this.updatePinnedMessage(scopeKey);
       } else {
         logger.debug("[PinnedManager] loadDiffsFromMessages: no file changes found");
       }
@@ -570,9 +677,10 @@ class PinnedMessageManager {
   /**
    * Refresh session title from API
    */
-  private async refreshSessionTitle(): Promise<void> {
-    const session = getCurrentSession();
-    const project = getCurrentProject();
+  private async refreshSessionTitle(scopeKey?: string): Promise<void> {
+    const session = getCurrentSession(scopeKey);
+    const project = getCurrentProject(scopeKey);
+    const state = this.getContext(scopeKey).state;
 
     if (!session || !project) {
       return;
@@ -584,8 +692,8 @@ class PinnedMessageManager {
         directory: project.worktree,
       });
 
-      if (sessionData && sessionData.title !== this.state.sessionTitle) {
-        this.state.sessionTitle = sessionData.title;
+      if (sessionData && sessionData.title !== state.sessionTitle) {
+        state.sessionTitle = sessionData.title;
         logger.debug(`[PinnedManager] Session title refreshed: ${sessionData.title}`);
       }
     } catch (err) {
@@ -600,11 +708,12 @@ class PinnedMessageManager {
   /**
    * Refresh current project name and git branch.
    */
-  private async refreshProjectMetadata(): Promise<void> {
-    const project = getCurrentProject();
-    this.state.projectPath = project?.worktree || t("pinned.unknown");
-    this.state.projectBranch = null;
-    this.state.projectWorktreePath = null;
+  private async refreshProjectMetadata(scopeKey?: string): Promise<void> {
+    const project = getCurrentProject(scopeKey);
+    const state = this.getContext(scopeKey).state;
+    state.projectPath = project?.worktree || t("pinned.unknown");
+    state.projectBranch = null;
+    state.projectWorktreePath = null;
 
     if (!project?.worktree) {
       return;
@@ -616,9 +725,9 @@ class PinnedMessageManager {
         return;
       }
 
-      this.state.projectPath = worktreeContext.mainProjectPath;
-      this.state.projectBranch = worktreeContext.branch;
-      this.state.projectWorktreePath = worktreeContext.isLinkedWorktree
+      state.projectPath = worktreeContext.mainProjectPath;
+      state.projectBranch = worktreeContext.branch;
+      state.projectWorktreePath = worktreeContext.isLinkedWorktree
         ? worktreeContext.activeWorktreePath
         : null;
     } catch (err) {
@@ -629,9 +738,9 @@ class PinnedMessageManager {
   /**
    * Make file path relative to project worktree
    */
-  private makeRelativePath(filePath: string): string {
+  private makeRelativePath(filePath: string, scopeKey?: string): string {
     const normalized = filePath.replace(/\\/g, "/");
-    const project = getCurrentProject();
+    const project = getCurrentProject(scopeKey);
 
     if (project?.worktree) {
       const worktree = project.worktree.replace(/\\/g, "/");
@@ -674,60 +783,63 @@ class PinnedMessageManager {
   /**
    * Fetch context limit from current model configuration
    */
-  private async fetchContextLimit(): Promise<void> {
+  private async fetchContextLimit(scopeKey?: string): Promise<void> {
     try {
-      const model = getStoredModel();
-      this.contextLimit = await getModelContextLimit(model.providerID, model.modelID);
-      this.state.tokensLimit = this.contextLimit;
-      logger.debug(`[PinnedManager] Context limit: ${this.contextLimit}`);
+      const context = this.getContext(scopeKey);
+      const model = getStoredModel(scopeKey);
+      context.contextLimit = await getModelContextLimit(model.providerID, model.modelID);
+      context.state.tokensLimit = context.contextLimit;
+      logger.debug(`[PinnedManager] Context limit: ${context.contextLimit}`);
     } catch (err) {
       if (isExpectedOpencodeUnavailableError(err)) {
         logger.warn("[PinnedManager] OpenCode server unavailable; using default context limit");
       } else {
         logger.error("[PinnedManager] Error fetching context limit:", err);
       }
-      this.contextLimit = DEFAULT_CONTEXT_LIMIT;
-      this.state.tokensLimit = this.contextLimit;
+      const context = this.getContext(scopeKey);
+      context.contextLimit = DEFAULT_CONTEXT_LIMIT;
+      context.state.tokensLimit = context.contextLimit;
     }
   }
 
   /**
    * Format the pinned message text
    */
-  private formatMessage(): string {
-    const currentModel = getStoredModel();
+  private formatMessage(scopeKey?: string): string {
+    const state = this.getContext(scopeKey).state;
+    const currentModel = getStoredModel(scopeKey);
     const modelName = formatModelDisplayName(currentModel.providerID, currentModel.modelID);
-    const projectDisplayName = this.state.projectBranch
-      ? `${this.state.projectPath}: ${this.state.projectBranch}`
-      : this.state.projectPath;
+    const projectDisplayName = state.projectBranch
+      ? `${state.projectPath}: ${state.projectBranch}`
+      : state.projectPath;
 
     const lines = [
-      `${this.state.sessionTitle}`,
+      `${state.sessionTitle}`,
       t("pinned.line.project", { project: projectDisplayName }),
     ];
 
-    if (this.state.projectWorktreePath) {
-      lines.push(t("pinned.line.worktree", { worktree: this.state.projectWorktreePath }));
+    if (state.projectWorktreePath) {
+      lines.push(t("pinned.line.worktree", { worktree: state.projectWorktreePath }));
     }
 
     lines.push(t("pinned.line.model", { model: modelName }));
 
-    lines.push(formatContextLine(this.state.tokensUsed, this.state.tokensLimit));
+    lines.push(formatContextLine(state.tokensUsed, state.tokensLimit));
 
-    if (this.state.cost !== undefined && this.state.cost !== null) {
-      lines.push(formatCostLine(this.state.cost));
+    if (state.cost !== undefined && state.cost !== null) {
+      lines.push(formatCostLine(state.cost));
     }
 
-    if (this.state.changedFiles.length > 0) {
+    if (state.changedFiles.length > 0) {
       const maxFiles = 10;
-      const total = this.state.changedFiles.length;
-      const filesToShow = this.state.changedFiles.slice(0, maxFiles);
+      const total = state.changedFiles.length;
+      const filesToShow = state.changedFiles.slice(0, maxFiles);
 
       lines.push("");
       lines.push(t("pinned.files.title", { count: total }));
 
       for (const f of filesToShow) {
-        const relativePath = this.makeRelativePath(f.file);
+        const relativePath = this.makeRelativePath(f.file, scopeKey);
         const parts = [];
         if (f.additions > 0) parts.push(`+${f.additions}`);
         if (f.deletions > 0) parts.push(`-${f.deletions}`);
@@ -745,28 +857,33 @@ class PinnedMessageManager {
   /**
    * Create and pin a new status message
    */
-  private async createPinnedMessage(): Promise<void> {
-    if (!this.api || !this.chatId) {
+  private async createPinnedMessage(scopeKey?: string): Promise<void> {
+    const context = this.getContext(scopeKey);
+    if (!context.api || !context.chatId) {
       logger.warn("[PinnedManager] API or chatId not initialized");
       return;
     }
 
     try {
-      const text = this.formatMessage();
+      const text = this.formatMessage(scopeKey);
 
       // Send new message
-      const sentMessage = await this.api.sendMessage(this.chatId, text);
+      const threadOptions = getOptionalThreadSendOptions(context.threadId);
+      const sentMessage = threadOptions
+        ? await context.api.sendMessage(context.chatId, text, threadOptions)
+        : await context.api.sendMessage(context.chatId, text);
 
-      this.state.messageId = sentMessage.message_id;
-      this.state.chatId = this.chatId;
-      this.state.lastUpdated = Date.now();
-      this.lastRenderedMessageText = text;
+      context.state.messageId = sentMessage.message_id;
+      context.state.chatId = context.chatId;
+      context.state.threadId = context.threadId;
+      context.state.lastUpdated = Date.now();
+      context.lastRenderedMessageText = text;
 
       // Save to settings for persistence
-      setPinnedMessageId(sentMessage.message_id);
+      setPinnedMessageId(sentMessage.message_id, this.normalizeScopeKey(scopeKey));
 
       // Pin the message (silently)
-      await this.api.pinChatMessage(this.chatId, sentMessage.message_id, {
+      await context.api.pinChatMessage(context.chatId, sentMessage.message_id, {
         disable_notification: true,
       });
 
@@ -779,56 +896,60 @@ class PinnedMessageManager {
   /**
    * Update existing pinned message text
    */
-  private async updatePinnedMessage(forceUpdate: boolean = false): Promise<void> {
-    if (!this.api || !this.chatId || !this.state.messageId) {
+  private async updatePinnedMessage(scopeKey?: string, forceUpdate: boolean = false): Promise<void> {
+    const context = this.getContext(scopeKey);
+    if (!context.api || !context.chatId || !context.state.messageId) {
       return;
     }
 
-    this.pendingUpdate = true;
+    context.pendingUpdate = true;
     if (forceUpdate) {
-      this.pendingForceUpdate = true;
+      context.pendingForceUpdate = true;
     }
 
-    if (this.updateTask) {
-      await this.updateTask;
+    if (context.updateTask) {
+      await context.updateTask;
       return;
     }
 
-    this.updateTask = this.flushPendingPinnedUpdates().finally(() => {
-      this.updateTask = null;
+    context.updateTask = this.flushPendingPinnedUpdates(context, scopeKey).finally(() => {
+      context.updateTask = null;
     });
 
-    await this.updateTask;
+    await context.updateTask;
   }
 
-  private async flushPendingPinnedUpdates(): Promise<void> {
-    while (this.pendingUpdate) {
-      this.pendingUpdate = false;
-      const shouldForceUpdate = this.pendingForceUpdate;
-      this.pendingForceUpdate = false;
+  private async flushPendingPinnedUpdates(
+    context: PinnedScopeContext,
+    scopeKey?: string,
+  ): Promise<void> {
+    while (context.pendingUpdate) {
+      context.pendingUpdate = false;
+      const shouldForceUpdate = context.pendingForceUpdate;
+      context.pendingForceUpdate = false;
 
-      if (!this.api || !this.chatId || !this.state.messageId) {
+      if (!context.api || !context.chatId || !context.state.messageId) {
         return;
       }
 
-      const text = this.formatMessage();
+      const text = this.formatMessage(scopeKey);
 
-      if (!shouldForceUpdate && text === this.lastRenderedMessageText) {
+      if (!shouldForceUpdate && text === context.lastRenderedMessageText) {
         logger.debug("[PinnedManager] Skipping pinned update: message content unchanged");
         continue;
       }
 
       try {
-        await this.api.editMessageText(this.chatId, this.state.messageId, text);
-        this.state.lastUpdated = Date.now();
-        this.lastRenderedMessageText = text;
+        await context.api.editMessageText(context.chatId, context.state.messageId, text);
+        context.state.lastUpdated = Date.now();
+        context.lastRenderedMessageText = text;
 
-        logger.debug(`[PinnedManager] Updated pinned message: ${this.state.messageId}`);
+        logger.debug(`[PinnedManager] Updated pinned message: ${context.state.messageId}`);
 
         // Trigger keyboard update callback
-        if (this.onKeyboardUpdateCallback && this.state.tokensLimit > 0) {
+        if (this.onKeyboardUpdateCallback && context.state.tokensLimit > 0) {
           setImmediate(() => {
-            this.onKeyboardUpdateCallback!(this.state.tokensUsed, this.state.tokensLimit);
+            this.emitKeyboardUpdate(context.state.tokensUsed, context.state.tokensLimit, scopeKey);
           });
         }
       } catch (err: unknown) {
@@ -837,18 +958,18 @@ class PinnedMessageManager {
 
         // Handle "message is not modified" error silently
         if (errorMessage.includes("message is not modified")) {
-          this.lastRenderedMessageText = text;
+          context.lastRenderedMessageText = text;
           continue;
         }
 
         // Handle "message to edit not found" - recreate
         if (errorMessage.includes("message to edit not found")) {
           logger.warn("[PinnedManager] Pinned message was deleted, recreating...");
-          this.state.messageId = null;
-          this.lastRenderedMessageText = null;
-          this.pendingForceUpdate = false;
-          clearPinnedMessageId();
-          await this.createPinnedMessage();
+          context.state.messageId = null;
+          context.lastRenderedMessageText = null;
+          context.pendingForceUpdate = false;
+          clearPinnedMessageId(this.normalizeScopeKey(scopeKey));
+          await this.createPinnedMessage(scopeKey);
           continue;
         }
 
@@ -860,20 +981,21 @@ class PinnedMessageManager {
   /**
    * Unpin old message before creating new one
    */
-  private async unpinOldMessage(): Promise<void> {
-    if (!this.api || !this.chatId) {
+  private async unpinOldMessage(scopeKey?: string): Promise<void> {
+    const context = this.getContext(scopeKey);
+    if (!context.api || !context.chatId) {
       return;
     }
 
     try {
       // Unpin all messages (ensures clean state)
-      await this.api.unpinAllChatMessages(this.chatId).catch(() => {});
+      await context.api.unpinAllChatMessages(context.chatId).catch(() => {});
 
-      this.state.messageId = null;
-      this.lastRenderedMessageText = null;
-      this.pendingUpdate = false;
-      this.pendingForceUpdate = false;
-      clearPinnedMessageId();
+      context.state.messageId = null;
+      context.lastRenderedMessageText = null;
+      context.pendingUpdate = false;
+      context.pendingForceUpdate = false;
+      clearPinnedMessageId(this.normalizeScopeKey(scopeKey));
 
       logger.debug("[PinnedManager] Unpinned old messages");
     } catch (err) {
@@ -884,61 +1006,37 @@ class PinnedMessageManager {
   /**
    * Get current state (for debugging/status)
    */
-  getState(): PinnedMessageState {
-    return { ...this.state };
+  getState(scopeKey?: string): PinnedMessageState {
+    return { ...this.getContext(scopeKey).state };
   }
 
   /**
    * Check if manager is initialized
    */
-  isInitialized(): boolean {
-    return this.api !== null && this.chatId !== null;
+  isInitialized(scopeKey?: string): boolean {
+    const context = this.getContext(scopeKey);
+    return context.api !== null && context.chatId !== null;
   }
 
   /**
    * Clear pinned message (when switching projects)
    */
-  async clear(): Promise<void> {
-    if (!this.api || !this.chatId) {
+  async clear(scopeKey?: string): Promise<void> {
+    const context = this.getContext(scopeKey);
+    if (!context.api || !context.chatId) {
       // Just reset state if not initialized
-      this.state.messageId = null;
-      this.state.sessionId = null;
-      this.state.sessionTitle = t("pinned.default_session_title");
-      this.state.attachActive = false;
-      this.state.attachBusy = false;
-      this.state.tokensUsed = 0;
-      this.state.tokensLimit = 0;
-      this.state.projectPath = "";
-      this.state.projectBranch = null;
-      this.state.projectWorktreePath = null;
-      this.state.changedFiles = [];
-      this.lastRenderedMessageText = null;
-      this.pendingUpdate = false;
-      this.pendingForceUpdate = false;
-      clearPinnedMessageId();
+      this.resetContextState(context);
+      clearPinnedMessageId(this.normalizeScopeKey(scopeKey));
       return;
     }
 
     try {
       // Unpin all messages
-      await this.api.unpinAllChatMessages(this.chatId).catch(() => {});
+      await context.api.unpinAllChatMessages(context.chatId).catch(() => {});
 
       // Reset state
-      this.state.messageId = null;
-      this.state.sessionId = null;
-      this.state.sessionTitle = t("pinned.default_session_title");
-      this.state.attachActive = false;
-      this.state.attachBusy = false;
-      this.state.projectPath = "";
-      this.state.projectBranch = null;
-      this.state.projectWorktreePath = null;
-      this.state.tokensUsed = 0;
-      this.state.tokensLimit = 0;
-      this.state.changedFiles = [];
-      this.lastRenderedMessageText = null;
-      this.pendingUpdate = false;
-      this.pendingForceUpdate = false;
-      clearPinnedMessageId();
+      this.resetContextState(context);
+      clearPinnedMessageId(this.normalizeScopeKey(scopeKey));
 
       logger.info("[PinnedManager] Cleared pinned message state");
     } catch (err) {

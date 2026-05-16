@@ -5,13 +5,21 @@ import { getCurrentAgent, setCurrentAgent } from "../settings/manager.js";
 import { logger } from "../utils/logger.js";
 import type { AgentInfo } from "./types.js";
 
+function persistCurrentAgent(agentName: string, scopeKey?: string): void {
+  if (scopeKey) {
+    setCurrentAgent(agentName, scopeKey);
+  } else {
+    setCurrentAgent(agentName);
+  }
+}
+
 /**
  * Get list of available agents from OpenCode API
  * @returns Array of available agents (filtered by mode and hidden flag)
  */
-export async function getAvailableAgents(): Promise<AgentInfo[]> {
+export async function getAvailableAgents(scopeKey?: string): Promise<AgentInfo[]> {
   try {
-    const project = getCurrentProject();
+    const project = getCurrentProject(scopeKey);
     const { data: agents, error } = await opencodeClient.app.agents(
       project ? { directory: project.worktree } : undefined,
     );
@@ -49,15 +57,15 @@ function pickFallbackAgent(agents: AgentInfo[]): string {
   return agents[0]?.name ?? DEFAULT_AGENT;
 }
 
-export async function resolveProjectAgent(preferredAgent?: string): Promise<string> {
-  const requestedAgent = preferredAgent ?? getCurrentAgent() ?? DEFAULT_AGENT;
-  const project = getCurrentProject();
+export async function resolveProjectAgent(preferredAgent?: string, scopeKey?: string): Promise<string> {
+  const requestedAgent = preferredAgent ?? getCurrentAgent(scopeKey) ?? DEFAULT_AGENT;
+  const project = getCurrentProject(scopeKey);
 
   if (!project) {
     return requestedAgent;
   }
 
-  const agents = await getAvailableAgents();
+  const agents = await getAvailableAgents(scopeKey);
   if (agents.length === 0) {
     return requestedAgent;
   }
@@ -70,7 +78,7 @@ export async function resolveProjectAgent(preferredAgent?: string): Promise<stri
   logger.warn(
     `[AgentManager] Agent "${requestedAgent}" is not available for project ${project.worktree}. Falling back to "${fallbackAgent}".`,
   );
-  setCurrentAgent(fallbackAgent);
+  persistCurrentAgent(fallbackAgent, scopeKey);
   return fallbackAgent;
 }
 
@@ -79,10 +87,10 @@ export async function resolveProjectAgent(preferredAgent?: string): Promise<stri
  * Falls back to "build" if nothing is stored.
  * @returns Current agent name
  */
-export async function fetchCurrentAgent(): Promise<string> {
-  const storedAgent = getCurrentAgent();
-  const session = getCurrentSession();
-  const project = getCurrentProject();
+export async function fetchCurrentAgent(scopeKey?: string): Promise<string> {
+  const storedAgent = getCurrentAgent(scopeKey);
+  const session = getCurrentSession(scopeKey);
+  const project = getCurrentProject(scopeKey);
 
   if (!project) {
     // No active project, return stored agent from settings
@@ -90,7 +98,7 @@ export async function fetchCurrentAgent(): Promise<string> {
   }
 
   if (!session) {
-    return resolveProjectAgent(storedAgent ?? DEFAULT_AGENT);
+    return resolveProjectAgent(storedAgent ?? DEFAULT_AGENT, scopeKey);
   }
 
   try {
@@ -102,7 +110,7 @@ export async function fetchCurrentAgent(): Promise<string> {
 
     if (error || !messages || messages.length === 0) {
       logger.debug("[AgentManager] No messages found, using stored agent");
-      return resolveProjectAgent(storedAgent ?? DEFAULT_AGENT);
+      return resolveProjectAgent(storedAgent ?? DEFAULT_AGENT, scopeKey);
     }
 
     const lastAgent = messages[0].info.agent;
@@ -114,18 +122,18 @@ export async function fetchCurrentAgent(): Promise<string> {
       logger.debug(
         `[AgentManager] Using stored agent "${storedAgent}" instead of session agent "${lastAgent}"`,
       );
-      return resolveProjectAgent(storedAgent);
+      return resolveProjectAgent(storedAgent, scopeKey);
     }
 
     // No stored agent yet: sync from session history
     if (lastAgent && lastAgent !== storedAgent) {
-      setCurrentAgent(lastAgent);
+      persistCurrentAgent(lastAgent, scopeKey);
     }
 
-    return resolveProjectAgent(lastAgent || storedAgent || DEFAULT_AGENT);
+    return resolveProjectAgent(lastAgent || storedAgent || DEFAULT_AGENT, scopeKey);
   } catch (err) {
     logger.error("[AgentManager] Error fetching current agent:", err);
-    return resolveProjectAgent(storedAgent ?? DEFAULT_AGENT);
+    return resolveProjectAgent(storedAgent ?? DEFAULT_AGENT, scopeKey);
   }
 }
 
@@ -133,15 +141,15 @@ export async function fetchCurrentAgent(): Promise<string> {
  * Select agent and persist to settings
  * @param agentName Name of the agent to select
  */
-export function selectAgent(agentName: string): void {
+export function selectAgent(agentName: string, scopeKey?: string): void {
   logger.info(`[AgentManager] Selected agent: ${agentName}`);
-  setCurrentAgent(agentName);
+  persistCurrentAgent(agentName, scopeKey);
 }
 
 /**
  * Get stored agent from settings (synchronous)
  * @returns Current agent name or default "build"
  */
-export function getStoredAgent(): string {
-  return getCurrentAgent() ?? "build";
+export function getStoredAgent(scopeKey?: string): string {
+  return getCurrentAgent(scopeKey) ?? "build";
 }

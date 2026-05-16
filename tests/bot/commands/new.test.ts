@@ -7,6 +7,11 @@ import { t } from "../../../src/i18n/index.js";
 const mocked = vi.hoisted(() => ({
   sessionCreateMock: vi.fn(),
   getCurrentProjectMock: vi.fn(),
+  setCurrentProjectMock: vi.fn(),
+  setCurrentAgentMock: vi.fn(),
+  setCurrentModelMock: vi.fn(),
+  setCurrentSessionMock: vi.fn(),
+  registerTopicSessionBindingMock: vi.fn(),
   attachToSessionMock: vi.fn(),
   ensureEventSubscriptionMock: vi.fn(),
 }));
@@ -21,10 +26,20 @@ vi.mock("../../../src/opencode/client.js", () => ({
 
 vi.mock("../../../src/settings/manager.js", () => ({
   getCurrentProject: mocked.getCurrentProjectMock,
+  setCurrentProject: mocked.setCurrentProjectMock,
+  setCurrentAgent: mocked.setCurrentAgentMock,
+  setCurrentModel: mocked.setCurrentModelMock,
+  TOPIC_SESSION_STATUS: {
+    ACTIVE: "active",
+    CLOSED: "closed",
+    STALE: "stale",
+    ABANDONED: "abandoned",
+    ERROR: "error",
+  },
 }));
 
 vi.mock("../../../src/session/manager.js", () => ({
-  setCurrentSession: vi.fn(),
+  setCurrentSession: mocked.setCurrentSessionMock,
 }));
 
 vi.mock("../../../src/session/cache-manager.js", () => ({
@@ -77,10 +92,26 @@ vi.mock("../../../src/attach/service.js", () => ({
   attachToSession: mocked.attachToSessionMock,
 }));
 
+vi.mock("../../../src/topic/manager.js", () => ({
+  registerTopicSessionBinding: mocked.registerTopicSessionBindingMock,
+}));
+
 function createContext(): Context {
   return {
     chat: { id: 123 },
     api: {},
+    reply: vi.fn().mockResolvedValue({ message_id: 1 }),
+  } as unknown as Context;
+}
+
+function createForumGeneralContext(): Context {
+  return {
+    chat: { id: -100123, type: "supergroup", is_forum: true },
+    message: { text: "/new", is_topic_message: true },
+    api: {
+      createForumTopic: vi.fn().mockResolvedValue({ message_thread_id: 42 }),
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 777 }),
+    },
     reply: vi.fn().mockResolvedValue({ message_id: 1 }),
   } as unknown as Context;
 }
@@ -97,6 +128,11 @@ describe("bot/commands/new", () => {
     foregroundSessionState.__resetForTests();
     mocked.sessionCreateMock.mockReset();
     mocked.getCurrentProjectMock.mockReset();
+    mocked.setCurrentProjectMock.mockReset();
+    mocked.setCurrentAgentMock.mockReset();
+    mocked.setCurrentModelMock.mockReset();
+    mocked.setCurrentSessionMock.mockReset();
+    mocked.registerTopicSessionBindingMock.mockReset();
     mocked.attachToSessionMock.mockReset();
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
@@ -142,6 +178,53 @@ describe("bot/commands/new", () => {
       expect.objectContaining({
         reply_markup: { keyboard: true },
       }),
+    );
+  });
+
+  it("creates a forum topic when /new is run from the general forum topic", async () => {
+    mocked.sessionCreateMock.mockResolvedValueOnce({
+      data: { id: "session-2", title: "Session Two" },
+      error: null,
+    });
+
+    const ctx = createForumGeneralContext();
+    await newCommand(ctx as never, createDeps());
+
+    expect(ctx.api.createForumTopic).toHaveBeenCalledWith(-100123, "Session Two", {
+      icon_color: 0x6fb9f0,
+    });
+    expect(mocked.setCurrentProjectMock).toHaveBeenCalledWith(
+      { id: "project-1", worktree: "/repo" },
+      "-100123:42",
+    );
+    expect(mocked.setCurrentSessionMock).toHaveBeenCalledWith(
+      { id: "session-2", title: "Session Two", directory: "/repo" },
+      "-100123:42",
+    );
+    expect(mocked.registerTopicSessionBindingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopeKey: "-100123:42",
+        chatId: -100123,
+        threadId: 42,
+        sessionId: "session-2",
+        status: "active",
+      }),
+    );
+    expect(mocked.attachToSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: -100123,
+        threadId: 42,
+        scopeKey: "-100123:42",
+      }),
+    );
+    expect(ctx.api.sendMessage).toHaveBeenCalledWith(
+      -100123,
+      t("new.topic_created", { title: "Session Two" }),
+      expect.objectContaining({ message_thread_id: 42 }),
+    );
+    expect(ctx.reply).toHaveBeenCalledWith(
+      expect.stringContaining(t("new.general_created")),
+      {},
     );
   });
 });

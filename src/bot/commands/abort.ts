@@ -6,6 +6,9 @@ import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { foregroundSessionState } from "../../scheduled-task/foreground-state.js";
 import { assistantRunState } from "../assistant-run-state.js";
+import { getOptionalThreadSendOptions, getScopeFromContext } from "../scope.js";
+import { TOPIC_SESSION_STATUS } from "../../settings/manager.js";
+import { updateTopicBindingStatusBySessionId } from "../../topic/manager.js";
 
 type SessionState = "idle" | "busy" | "not-found";
 
@@ -15,8 +18,11 @@ interface AbortCurrentOperationOptions {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-function abortLocalStreaming(): void {
-  clearAllInteractionState("abort_command");
+function abortLocalStreaming(scopeKey?: string, sessionId?: string): void {
+  clearAllInteractionState("abort_command", scopeKey);
+  if (sessionId) {
+    updateTopicBindingStatusBySessionId(sessionId, TOPIC_SESSION_STATUS.ABANDONED);
+  }
 }
 
 async function pollSessionStatus(
@@ -63,15 +69,21 @@ export async function abortCurrentOperation(
   options: AbortCurrentOperationOptions = {},
 ): Promise<void> {
   const notifyUser = options.notifyUser ?? true;
+  const scope = getScopeFromContext(ctx);
+  const scopeKey = scope?.key;
 
   try {
-    abortLocalStreaming();
-
-    const currentSession = getCurrentSession();
+    const currentSession = getCurrentSession(scopeKey);
+    abortLocalStreaming(scopeKey, currentSession?.id);
 
     if (!currentSession) {
       if (notifyUser) {
-        await ctx.reply(t("stop.no_active_session"));
+        const threadOptions = getOptionalThreadSendOptions(scope?.threadId ?? null);
+        if (threadOptions) {
+          await ctx.reply(t("stop.no_active_session"), threadOptions);
+        } else {
+          await ctx.reply(t("stop.no_active_session"));
+        }
       }
       return;
     }
@@ -80,7 +92,10 @@ export async function abortCurrentOperation(
     let chatId: number | null = null;
 
     if (notifyUser) {
-      const waitingMessage = await ctx.reply(t("stop.in_progress"));
+      const threadOptions = getOptionalThreadSendOptions(scope?.threadId ?? null);
+      const waitingMessage = threadOptions
+        ? await ctx.reply(t("stop.in_progress"), threadOptions)
+        : await ctx.reply(t("stop.in_progress"));
       waitingMessageId = waitingMessage.message_id;
       chatId = ctx.chat?.id ?? null;
 

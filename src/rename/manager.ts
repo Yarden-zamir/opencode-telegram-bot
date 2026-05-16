@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger.js";
+import { GLOBAL_SCOPE_KEY } from "../bot/scope.js";
 
 interface RenameState {
   isWaiting: boolean;
@@ -9,63 +10,77 @@ interface RenameState {
 }
 
 class RenameManager {
-  private state: RenameState = {
+  private states = new Map<string, RenameState>();
+
+  private normalizeScopeKey(scopeKey?: string): string {
+    return scopeKey ?? GLOBAL_SCOPE_KEY;
+  }
+
+  private createEmptyState(): RenameState {
+    return {
     isWaiting: false,
     sessionId: null,
     sessionDirectory: null,
     currentTitle: null,
     messageId: null,
   };
+  }
 
-  startWaiting(sessionId: string, directory: string, currentTitle: string): void {
+  private getState(scopeKey?: string): RenameState {
+    const normalizedScopeKey = this.normalizeScopeKey(scopeKey);
+    let state = this.states.get(normalizedScopeKey);
+    if (!state) {
+      state = this.createEmptyState();
+      this.states.set(normalizedScopeKey, state);
+    }
+    return state;
+  }
+
+  startWaiting(sessionId: string, directory: string, currentTitle: string, scopeKey?: string): void {
     logger.info(`[RenameManager] Starting rename flow for session: ${sessionId}`);
-    this.state = {
+    this.states.set(this.normalizeScopeKey(scopeKey), {
       isWaiting: true,
       sessionId,
       sessionDirectory: directory,
       currentTitle,
       messageId: null,
-    };
+    });
   }
 
-  setMessageId(messageId: number): void {
-    this.state.messageId = messageId;
+  setMessageId(messageId: number, scopeKey?: string): void {
+    this.getState(scopeKey).messageId = messageId;
   }
 
-  getMessageId(): number | null {
-    return this.state.messageId;
+  getMessageId(scopeKey?: string): number | null {
+    return this.getState(scopeKey).messageId;
   }
 
-  isActiveMessage(messageId: number | null): boolean {
+  isActiveMessage(messageId: number | null, scopeKey?: string): boolean {
+    const state = this.getState(scopeKey);
     return (
-      this.state.isWaiting && this.state.messageId !== null && this.state.messageId === messageId
+      state.isWaiting && state.messageId !== null && state.messageId === messageId
     );
   }
 
-  isWaitingForName(): boolean {
-    return this.state.isWaiting;
+  isWaitingForName(scopeKey?: string): boolean {
+    return this.getState(scopeKey).isWaiting;
   }
 
-  getSessionInfo(): { sessionId: string; directory: string; currentTitle: string } | null {
-    if (!this.state.isWaiting || !this.state.sessionId) {
+  getSessionInfo(scopeKey?: string): { sessionId: string; directory: string; currentTitle: string } | null {
+    const state = this.getState(scopeKey);
+    if (!state.isWaiting || !state.sessionId) {
       return null;
     }
     return {
-      sessionId: this.state.sessionId,
-      directory: this.state.sessionDirectory!,
-      currentTitle: this.state.currentTitle!,
+      sessionId: state.sessionId,
+      directory: state.sessionDirectory!,
+      currentTitle: state.currentTitle!,
     };
   }
 
-  clear(): void {
+  clear(scopeKey?: string): void {
     logger.debug("[RenameManager] Clearing rename state");
-    this.state = {
-      isWaiting: false,
-      sessionId: null,
-      sessionDirectory: null,
-      currentTitle: null,
-      messageId: null,
-    };
+    this.states.set(this.normalizeScopeKey(scopeKey), this.createEmptyState());
   }
 }
 

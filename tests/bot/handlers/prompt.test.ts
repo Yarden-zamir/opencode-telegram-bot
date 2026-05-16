@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Context } from "grammy";
-import { processUserPrompt, type ProcessPromptDeps } from "../../../src/bot/handlers/prompt.js";
+import {
+  __resetQueuedPromptsForTests,
+  dispatchNextQueuedPrompt,
+  processUserPrompt,
+  type ProcessPromptDeps,
+} from "../../../src/bot/handlers/prompt.js";
 
 const mocked = vi.hoisted(() => ({
   currentProject: { id: "project-1", worktree: "D:\\Projects\\Repo" },
@@ -18,6 +23,9 @@ const mocked = vi.hoisted(() => ({
   setSessionSummaryMock: vi.fn(),
   setBotAndChatIdMock: vi.fn(),
   attachToSessionMock: vi.fn(),
+  getTopicBindingByScopeKeyMock: vi.fn(),
+  registerTopicSessionBindingMock: vi.fn(),
+  getScheduledTaskTopicByChatAndThreadMock: vi.fn(),
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
@@ -137,9 +145,26 @@ vi.mock("../../../src/external-input/suppression.js", () => ({
   },
 }));
 
+vi.mock("../../../src/topic/manager.js", () => ({
+  getTopicBindingByScopeKey: mocked.getTopicBindingByScopeKeyMock,
+  registerTopicSessionBinding: mocked.registerTopicSessionBindingMock,
+}));
+
+vi.mock("../../../src/scheduled-task/store.js", () => ({
+  getScheduledTaskTopicByChatAndThread: mocked.getScheduledTaskTopicByChatAndThreadMock,
+}));
+
 function createContext(): Context {
   return {
     chat: { id: 777 },
+    reply: vi.fn().mockResolvedValue({ message_id: 100 }),
+  } as unknown as Context;
+}
+
+function createTopicContext(threadId: number): Context {
+  return {
+    chat: { id: -100777, type: "supergroup", is_forum: true },
+    message: { text: "Prompt", message_thread_id: threadId, is_topic_message: true },
     reply: vi.fn().mockResolvedValue({ message_id: 100 }),
   } as unknown as Context;
 }
@@ -167,6 +192,7 @@ function getScheduledBackgroundTask(): {
 
 describe("bot/handlers/prompt", () => {
   beforeEach(() => {
+    __resetQueuedPromptsForTests();
     mocked.currentProject = { id: "project-1", worktree: "D:\\Projects\\Repo" };
     mocked.currentSession = {
       id: "session-1",
@@ -182,6 +208,11 @@ describe("bot/handlers/prompt", () => {
     mocked.setSessionSummaryMock.mockReset();
     mocked.setBotAndChatIdMock.mockReset();
     mocked.attachToSessionMock.mockReset();
+    mocked.getTopicBindingByScopeKeyMock.mockReset();
+    mocked.getTopicBindingByScopeKeyMock.mockReturnValue({ sessionId: "session-1" });
+    mocked.registerTopicSessionBindingMock.mockReset();
+    mocked.getScheduledTaskTopicByChatAndThreadMock.mockReset();
+    mocked.getScheduledTaskTopicByChatAndThreadMock.mockResolvedValue(null);
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
       alreadyAttached: false,
@@ -288,5 +319,99 @@ describe("bot/handlers/prompt", () => {
 
     expect(handled).toBe(true);
     expect(mocked.suppressionRegisterMock).not.toHaveBeenCalled();
+  });
+
+  it("queues prompts while the current session is busy", async () => {
+    mocked.sessionStatusMock.mockResolvedValueOnce({
+      data: {
+        "session-1": { type: "busy" },
+      },
+      error: null,
+    });
+
+    const ctx = createContext();
+    const handled = await processUserPrompt(ctx, "Follow up", createDeps());
+
+    expect(handled).toBe(true);
+    expect(ctx.reply).toHaveBeenCalledWith(
+      "📝 Your message was queued for this session.\n\nQueue position: 1\nWhat happens next: it will start automatically after the current run finishes.",
+    );
+    expect(mocked.safeBackgroundTaskMock).not.toHaveBeenCalled();
+    expect(mocked.suppressionRegisterMock).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the next queued prompt when the session becomes idle", async () => {
+    const deps = createDeps();
+    mocked.sessionStatusMock.mockResolvedValueOnce({
+      data: {
+        "session-1": { type: "busy" },
+      },
+      error: null,
+    });
+    await processUserPrompt(createContext(), "Follow up", deps);
+
+    mocked.sessionStatusMock.mockResolvedValueOnce({
+      data: {
+        "session-1": { type: "idle" },
+      },
+      error: null,
+    });
+
+    const dispatched = await dispatchNextQueuedPrompt("session-1");
+
+    expect(dispatched).toBe(true);
+    expect(deps.bot.api.sendMessage).toHaveBeenCalledWith(
+      777,
+      "▶️ Starting the next queued message for this session.\n\nQueued message:\nFollow up",
+    );
+
+    const backgroundTask = getScheduledBackgroundTask();
+    await backgroundTask.task();
+
+    expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith({
+      sessionID: "session-1",
+      directory: "D:\\Projects\\Repo",
+      parts: [{ type: "text", text: "Follow up" }],
+      agent: "build",
+      model: {
+        providerID: "openai",
+        modelID: "gpt-5",
+      },
+      variant: "default",
+    });
+    expect(mocked.suppressionRegisterMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks prompts in scheduled task output topics", async () => {
+    mocked.getScheduledTaskTopicByChatAndThreadMock.mockResolvedValueOnce({
+      chatId: -100777,
+      threadId: 55,
+      projectId: "project-1",
+      topicName: "Scheduled output",
+    });
+
+    const ctx = createTopicContext(55);
+    const handled = await processUserPrompt(ctx, "Run this", createDeps());
+
+    expect(handled).toBe(false);
+    expect(ctx.reply).toHaveBeenCalledWith(
+      "This topic is reserved for scheduled task output. Go to the Session Control topic to start or continue a coding session.",
+      { message_thread_id: 55 },
+    );
+    expect(mocked.attachToSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks prompts in unbound forum topics", async () => {
+    mocked.getTopicBindingByScopeKeyMock.mockReturnValueOnce(undefined);
+
+    const ctx = createTopicContext(77);
+    const handled = await processUserPrompt(ctx, "Run this", createDeps());
+
+    expect(handled).toBe(false);
+    expect(ctx.reply).toHaveBeenCalledWith(
+      "⚠️ This topic is not linked to any session. Go to General topic and run /new.",
+      { message_thread_id: 77 },
+    );
+    expect(mocked.attachToSessionMock).not.toHaveBeenCalled();
   });
 });

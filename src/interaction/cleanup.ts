@@ -5,18 +5,18 @@ import { taskCreationManager } from "../scheduled-task/creation-manager.js";
 import { interactionManager } from "./manager.js";
 import { logger } from "../utils/logger.js";
 
-export function clearAllInteractionState(reason: string): void {
-  const questionActive = questionManager.isActive();
-  const permissionActive = permissionManager.isActive();
-  const renameActive = renameManager.isWaitingForName();
-  const taskCreationActive = taskCreationManager.isActive();
-  const interactionSnapshot = interactionManager.getSnapshot();
+export function clearAllInteractionState(reason: string, scopeKey?: string): void {
+  const questionActive = questionManager.isActive(scopeKey);
+  const permissionActive = permissionManager.isActive(scopeKey);
+  const renameActive = renameManager.isWaitingForName(scopeKey);
+  const taskCreationActive = taskCreationManager.isActive(scopeKey);
+  const interactionSnapshot = interactionManager.getSnapshot(scopeKey);
 
-  questionManager.clear();
-  permissionManager.clear();
-  renameManager.clear();
-  taskCreationManager.clear();
-  interactionManager.clear(reason);
+  questionManager.clear(scopeKey);
+  permissionManager.clear(scopeKey);
+  renameManager.clear(scopeKey);
+  taskCreationManager.clear(scopeKey);
+  interactionManager.clear(reason, scopeKey);
 
   const hasAnyActiveState =
     questionActive ||
@@ -26,7 +26,7 @@ export function clearAllInteractionState(reason: string): void {
     interactionSnapshot !== null;
 
   const message =
-    `[InteractionCleanup] Cleared state: reason=${reason}, ` +
+    `[InteractionCleanup] Cleared state: reason=${reason}, scope=${scopeKey ?? "global"}, ` +
     `questionActive=${questionActive}, permissionActive=${permissionActive}, ` +
     `renameActive=${renameActive}, taskCreationActive=${taskCreationActive}, ` +
     `interactionKind=${interactionSnapshot?.kind || "none"}`;

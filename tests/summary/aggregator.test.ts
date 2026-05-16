@@ -1422,6 +1422,7 @@ describe("summary/aggregator", () => {
 
     expect(onTokens).toHaveBeenCalledTimes(1);
     expect(onTokens).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({ input: 800, output: 200, cacheRead: 100 }),
       true,
     );
@@ -1447,6 +1448,7 @@ describe("summary/aggregator", () => {
 
     expect(onTokens).toHaveBeenCalledTimes(1);
     expect(onTokens).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({ input: 500, output: 50, cacheRead: 200 }),
       false,
     );
@@ -1474,6 +1476,7 @@ describe("summary/aggregator", () => {
     // The callback IS fired (filtering zero tokens is done at bot/index.ts level)
     expect(onTokens).toHaveBeenCalledTimes(1);
     expect(onTokens).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({ input: 0, cacheRead: 0 }),
       false,
     );
@@ -1496,6 +1499,7 @@ describe("summary/aggregator", () => {
 
     expect(onTokens).toHaveBeenCalledTimes(1);
     expect(onTokens).toHaveBeenCalledWith(
+      "session-1",
       expect.objectContaining({ input: 4000, cacheRead: 12000 }),
       false,
     );

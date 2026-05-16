@@ -25,7 +25,7 @@ describe("bot/commands/tts", () => {
     mocked.isTtsConfiguredMock.mockReset();
   });
 
-  it("enables audio replies globally", async () => {
+  it("enables audio replies for the current scope", async () => {
     mocked.isTtsEnabledMock.mockReturnValue(false);
     mocked.isTtsConfiguredMock.mockReturnValue(true);
     const replyMock = vi.fn().mockResolvedValue(undefined);
@@ -37,7 +37,7 @@ describe("bot/commands/tts", () => {
 
     await ttsCommand(ctx as never);
 
-    expect(mocked.setTtsEnabledMock).toHaveBeenCalledWith(true);
+    expect(mocked.setTtsEnabledMock).toHaveBeenCalledWith(true, "dm:42");
     expect(replyMock).toHaveBeenCalledWith(t("tts.enabled"));
   });
 
@@ -57,7 +57,7 @@ describe("bot/commands/tts", () => {
     expect(replyMock).toHaveBeenCalledWith(t("tts.not_configured"));
   });
 
-  it("disables audio replies globally", async () => {
+  it("disables audio replies for the current scope", async () => {
     mocked.isTtsEnabledMock.mockReturnValue(true);
     const replyMock = vi.fn().mockResolvedValue(undefined);
     const ctx = {
@@ -68,7 +68,7 @@ describe("bot/commands/tts", () => {
 
     await ttsCommand(ctx as never);
 
-    expect(mocked.setTtsEnabledMock).toHaveBeenCalledWith(false);
+    expect(mocked.setTtsEnabledMock).toHaveBeenCalledWith(false, "dm:42");
     expect(replyMock).toHaveBeenCalledWith(t("tts.disabled"));
   });
 });

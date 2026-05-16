@@ -250,6 +250,54 @@ describe("attach/service", () => {
     expect(mocked.showCurrentQuestionMock).toHaveBeenCalledOnce();
   });
 
+  it("restores pending questions into the scoped topic", async () => {
+    mocked.pinnedIsInitializedMock.mockReturnValue(false);
+    mocked.questionListMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: "question-1",
+          sessionID: "session-1",
+          questions: [
+            {
+              header: "Q1",
+              question: "Continue?",
+              options: [{ label: "Yes", description: "continue" }],
+            },
+          ],
+        },
+      ],
+      error: null,
+    });
+
+    const result = await attachToSession({
+      bot: createBot(),
+      chatId: -100123,
+      threadId: 42,
+      scopeKey: "-100123:42",
+      session: mocked.currentSession!,
+      ensureEventSubscription: mocked.ensureEventSubscriptionMock,
+    });
+
+    expect(result.restoredQuestion).toBe(true);
+    expect(mocked.pinnedInitializeMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      -100123,
+      "-100123:42",
+      42,
+    );
+    expect(mocked.keyboardInitializeMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      -100123,
+      "-100123:42",
+    );
+    expect(mocked.showCurrentQuestionMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      -100123,
+      "-100123:42",
+      42,
+    );
+  });
+
   it("restores the saved current session on startup", async () => {
     const restored = await restoreAttachedCurrentSession({
       bot: createBot(),

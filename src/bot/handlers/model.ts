@@ -14,6 +14,7 @@ import {
   replyWithInlineMenu,
 } from "./inline-menu.js";
 import { t } from "../../i18n/index.js";
+import { getScopeKeyFromContext, getThreadSendOptions } from "../scope.js";
 
 function buildModelSelectionMenuText(modelLists: ModelSelectionLists): string {
   const lines = [t("model.menu.select"), t("model.menu.favorites_title")];
@@ -49,10 +50,11 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
   }
 
   logger.debug(`[ModelHandler] Received callback: ${callbackQuery.data}`);
+  const scopeKey = getScopeKeyFromContext(ctx);
 
   try {
     if (ctx.chat) {
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
+      keyboardManager.initialize(ctx.api, ctx.chat.id, scopeKey);
     }
 
     // Parse callback data: "model:providerID:modelID"
@@ -74,26 +76,26 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     };
 
     // Select model and persist
-    selectModel(modelInfo);
+    selectModel(modelInfo, scopeKey);
 
     // Update keyboard manager state (may not be initialized if no session selected)
-    keyboardManager.updateModel(modelInfo);
+    keyboardManager.updateModel(modelInfo, scopeKey);
 
     // Refresh context limit for new model
-    await pinnedMessageManager.refreshContextLimit();
+    await pinnedMessageManager.refreshContextLimit(scopeKey);
 
     // Update Reply Keyboard with new model and context
-    const currentAgent = await resolveProjectAgent(getStoredAgent());
+    const currentAgent = await resolveProjectAgent(getStoredAgent(scopeKey), scopeKey);
     const contextInfo =
-      pinnedMessageManager.getContextInfo() ??
-      (pinnedMessageManager.getContextLimit() > 0
-        ? { tokensUsed: 0, tokensLimit: pinnedMessageManager.getContextLimit() }
+      pinnedMessageManager.getContextInfo(scopeKey) ??
+      (pinnedMessageManager.getContextLimit(scopeKey) > 0
+        ? { tokensUsed: 0, tokensLimit: pinnedMessageManager.getContextLimit(scopeKey) }
         : null);
 
-    keyboardManager.updateAgent(currentAgent);
+    keyboardManager.updateAgent(currentAgent, scopeKey);
 
     if (contextInfo) {
-      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
+      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit, scopeKey);
     }
 
     const variantName = formatVariantForButton(modelInfo.variant || "default");
@@ -111,6 +113,7 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     await ctx.answerCallbackQuery({ text: t("model.changed_callback", { name: displayName }) });
     await ctx.reply(t("model.changed_message", { name: displayName }), {
       reply_markup: keyboard,
+      ...getThreadSendOptions(ctx.callbackQuery?.message?.message_thread_id ?? null),
     });
 
     // Delete the inline menu message
@@ -169,7 +172,7 @@ export async function buildModelSelectionMenu(
  */
 export async function showModelSelectionMenu(ctx: Context): Promise<void> {
   try {
-    const currentModel = fetchCurrentModel();
+    const currentModel = fetchCurrentModel(getScopeKeyFromContext(ctx));
     const modelLists = await getModelSelectionLists();
     const keyboard = await buildModelSelectionMenu(currentModel, modelLists);
 

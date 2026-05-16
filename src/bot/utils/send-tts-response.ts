@@ -7,14 +7,15 @@ import { logger } from "../../utils/logger.js";
 const MAX_TTS_INPUT_CHARS = 4_000;
 
 interface TelegramAudioApi {
-  sendAudio: (chatId: number, audio: InputFile) => Promise<unknown>;
-  sendMessage: (chatId: number, text: string) => Promise<unknown>;
+  sendAudio: (chatId: number, audio: InputFile, options?: { message_thread_id?: number }) => Promise<unknown>;
+  sendMessage: (chatId: number, text: string, options?: { message_thread_id?: number }) => Promise<unknown>;
 }
 
 interface SendTtsResponseParams {
   api: TelegramAudioApi;
   sessionId: string;
   chatId: number;
+  threadId?: number | null;
   text: string;
   consumeResponseMode?: (sessionId: string) => "text_only" | "text_and_tts" | null;
   isTtsConfigured?: () => boolean;
@@ -25,6 +26,7 @@ export async function sendTtsResponseForSession({
   api,
   sessionId,
   chatId,
+  threadId = null,
   text,
   consumeResponseMode: consumeResponseModeImpl = consumePromptResponseMode,
   isTtsConfigured: isTtsConfiguredImpl = isTtsConfigured,
@@ -54,13 +56,22 @@ export async function sendTtsResponseForSession({
 
   try {
     const speech = await synthesizeSpeechImpl(normalizedText);
-    await api.sendAudio(chatId, new InputFile(speech.buffer, speech.filename));
+    const options = threadId ? { message_thread_id: threadId } : undefined;
+    if (options) {
+      await api.sendAudio(chatId, new InputFile(speech.buffer, speech.filename), options);
+    } else {
+      await api.sendAudio(chatId, new InputFile(speech.buffer, speech.filename));
+    }
     logger.info(`[TTS] Sent audio reply for session ${sessionId}`);
     return true;
   } catch (error) {
     logger.warn(`[TTS] Failed to send audio reply for session ${sessionId}`, error);
 
-    await api.sendMessage(chatId, t("tts.failed")).catch((sendError) => {
+    const options = threadId ? { message_thread_id: threadId } : undefined;
+    const sendErrorMessage = options
+      ? api.sendMessage(chatId, t("tts.failed"), options)
+      : api.sendMessage(chatId, t("tts.failed"));
+    await sendErrorMessage.catch((sendError) => {
       logger.warn(`[TTS] Failed to send audio error message for session ${sessionId}`, sendError);
     });
 

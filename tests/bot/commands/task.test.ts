@@ -7,6 +7,7 @@ import {
 } from "../../../src/bot/commands/task.js";
 import { interactionManager } from "../../../src/interaction/manager.js";
 import { taskCreationManager } from "../../../src/scheduled-task/creation-manager.js";
+import { SCHEDULED_TASK_OUTPUT_TOPIC_NAME } from "../../../src/scheduled-task/topic-output.js";
 import { t } from "../../../src/i18n/index.js";
 
 const mocked = vi.hoisted(() => ({
@@ -23,6 +24,8 @@ const mocked = vi.hoisted(() => ({
   parseTaskScheduleMock: vi.fn(),
   addScheduledTaskMock: vi.fn(),
   listScheduledTasksMock: vi.fn(),
+  getScheduledTaskTopicByChatAndProjectMock: vi.fn(),
+  upsertScheduledTaskTopicMock: vi.fn(),
   registerTaskMock: vi.fn(),
 }));
 
@@ -83,7 +86,9 @@ vi.mock("../../../src/scheduled-task/schedule-parser.js", () => ({
 
 vi.mock("../../../src/scheduled-task/store.js", () => ({
   addScheduledTask: mocked.addScheduledTaskMock,
+  getScheduledTaskTopicByChatAndProject: mocked.getScheduledTaskTopicByChatAndProjectMock,
   listScheduledTasks: mocked.listScheduledTasksMock,
+  upsertScheduledTaskTopic: mocked.upsertScheduledTaskTopicMock,
 }));
 
 vi.mock("../../../src/scheduled-task/runtime.js", () => ({
@@ -95,6 +100,13 @@ vi.mock("../../../src/scheduled-task/runtime.js", () => ({
 function createCommandContext(): Context {
   return {
     chat: { id: 777 },
+    reply: vi.fn().mockResolvedValue({ message_id: 100 }),
+  } as unknown as Context;
+}
+
+function createForumCommandContext(): Context {
+  return {
+    chat: { id: -100123, type: "supergroup", is_forum: true, username: "repo_group" },
     reply: vi.fn().mockResolvedValue({ message_id: 100 }),
   } as unknown as Context;
 }
@@ -113,6 +125,18 @@ function createTextContext(text: string, messageIds: number[]): Context {
       deleteMessage: vi.fn().mockResolvedValue(true),
     },
   } as unknown as Context;
+}
+
+function createForumTextContext(text: string, messageIds: number[]): Context {
+  const ctx = createTextContext(text, messageIds) as Context & {
+    api: {
+      createForumTopic: ReturnType<typeof vi.fn>;
+      deleteMessage: ReturnType<typeof vi.fn>;
+    };
+  };
+  ctx.chat = { id: -100123, type: "supergroup", is_forum: true, username: "repo_group" } as Context["chat"];
+  ctx.api.createForumTopic = vi.fn().mockResolvedValue({ message_thread_id: 42 });
+  return ctx;
 }
 
 function createCallbackContext(data: string, messageId: number): Context {
@@ -148,10 +172,14 @@ describe("bot/commands/task", () => {
     mocked.parseTaskScheduleMock.mockReset();
     mocked.addScheduledTaskMock.mockReset();
     mocked.listScheduledTasksMock.mockReset();
+    mocked.getScheduledTaskTopicByChatAndProjectMock.mockReset();
+    mocked.upsertScheduledTaskTopicMock.mockReset();
     mocked.registerTaskMock.mockReset();
     mocked.taskLimit = 10;
     mocked.addScheduledTaskMock.mockResolvedValue(undefined);
     mocked.listScheduledTasksMock.mockReturnValue([]);
+    mocked.getScheduledTaskTopicByChatAndProjectMock.mockResolvedValue(null);
+    mocked.upsertScheduledTaskTopicMock.mockResolvedValue(undefined);
     mocked.parseTaskScheduleMock.mockResolvedValue({
       kind: "cron",
       cron: "0 17 * * *",
@@ -267,6 +295,38 @@ describe("bot/commands/task", () => {
     expect(successCall[0]).toContain("Cron: 0 17 * * *");
     expect(taskCreationManager.isActive()).toBe(false);
     expect(interactionManager.getSnapshot()).toBeNull();
+  });
+
+  it("creates a scheduled task output topic in forum groups", async () => {
+    await taskCommand(createForumCommandContext() as never);
+    await handleTaskTextInput(createForumTextContext("every day at 17:00", [201, 202]));
+
+    const ctx = createForumTextContext("Send me a daily summary", [301]);
+    const handled = await handleTaskTextInput(ctx);
+
+    expect(handled).toBe(true);
+    expect(ctx.api.createForumTopic).toHaveBeenCalledWith(-100123, SCHEDULED_TASK_OUTPUT_TOPIC_NAME, {
+      icon_color: 0x6fb9f0,
+    });
+    expect(mocked.upsertScheduledTaskTopicMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: -100123,
+        projectId: "project-1",
+        projectWorktree: "D:\\Projects\\Repo",
+        threadId: 42,
+        topicName: SCHEDULED_TASK_OUTPUT_TOPIC_NAME,
+      }),
+    );
+    expect(mocked.addScheduledTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery: {
+          chatId: -100123,
+          threadId: 42,
+        },
+      }),
+    );
+    const successCall = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
+    expect(successCall[0]).toContain("https://t.me/repo_group/42");
   });
 
   it("stops task save when limit is reached before final step", async () => {

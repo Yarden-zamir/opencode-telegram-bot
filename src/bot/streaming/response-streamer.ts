@@ -26,15 +26,17 @@ interface ResponseStreamerCompleteOptions {
 interface ResponseStreamerOptions {
   throttleMs: number;
   sendPart: (
+    sessionId: string,
     part: TelegramRenderedPart,
     options?: TelegramSendMessageOptions,
   ) => Promise<{ messageId: number; deliveredSignature: string }>;
   editPart: (
+    sessionId: string,
     messageId: number,
     part: TelegramRenderedPart,
     options?: TelegramEditMessageOptions,
   ) => Promise<{ deliveredSignature: string }>;
-  deleteText: (messageId: number) => Promise<void>;
+  deleteText: (sessionId: string, messageId: number) => Promise<void>;
 }
 
 interface StreamState {
@@ -397,7 +399,7 @@ export class ResponseStreamer {
       }
 
       try {
-        await this.deleteText(messageId);
+        await this.deleteText(state.sessionId, messageId);
       } catch (error) {
         logger.warn(
           `[ResponseStreamer] Failed to delete broken stream message: session=${state.sessionId}, message=${state.messageId}, telegramMessageId=${messageId}, reason=${reason}`,
@@ -428,12 +430,17 @@ export class ResponseStreamer {
           continue;
         }
 
-        const result = await this.editPart(currentMessageId, part, payload.editOptions);
+        const result = await this.editPart(
+          state.sessionId,
+          currentMessageId,
+          part,
+          payload.editOptions,
+        );
         state.lastSentSignatures[index] = result.deliveredSignature;
         continue;
       }
 
-      const result = await this.sendPart(part, payload.sendOptions);
+      const result = await this.sendPart(state.sessionId, part, payload.sendOptions);
       state.telegramMessageIds[index] = result.messageId;
       state.lastSentSignatures[index] = result.deliveredSignature;
     }
@@ -441,7 +448,7 @@ export class ResponseStreamer {
     for (let index = state.telegramMessageIds.length - 1; index >= payload.parts.length; index--) {
       const messageId = state.telegramMessageIds[index];
       if (messageId) {
-        await this.deleteText(messageId);
+        await this.deleteText(state.sessionId, messageId);
       }
       state.telegramMessageIds.pop();
       state.lastSentSignatures.pop();

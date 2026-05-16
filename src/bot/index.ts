@@ -5,11 +5,13 @@ import { fileURLToPath } from "url";
 import { config } from "../config.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { interactionGuardMiddleware } from "./middleware/interaction-guard.js";
+import { scheduledOutputTopicMiddleware } from "./middleware/scheduled-output-topic.js";
 import { unknownCommandMiddleware } from "./middleware/unknown-command.js";
 import { BOT_COMMANDS } from "./commands/definitions.js";
 import { startCommand } from "./commands/start.js";
 import { helpCommand } from "./commands/help.js";
 import { statusCommand } from "./commands/status.js";
+import { lastCommand } from "./commands/last.js";
 import {
   AGENT_MODE_BUTTON_TEXT_PATTERN,
   MODEL_BUTTON_TEXT_PATTERN,
@@ -70,12 +72,16 @@ import { getCurrentSession } from "../session/manager.js";
 import { ingestSessionInfoForCache } from "../session/cache-manager.js";
 import { logger } from "../utils/logger.js";
 import { safeBackgroundTask } from "../utils/safe-background-task.js";
-import { withTelegramRateLimitRetry } from "../utils/telegram-rate-limit-retry.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
 import { t } from "../i18n/index.js";
 import { getCurrentProject } from "../settings/manager.js";
 import { createTelegramBotOptions } from "./telegram-client-options.js";
-import { clearPromptResponseMode, processUserPrompt } from "./handlers/prompt.js";
+import { TelegramRateLimiter } from "./telegram-rate-limiter.js";
+import {
+  clearPromptResponseMode,
+  dispatchNextQueuedPrompt,
+  processUserPrompt,
+} from "./handlers/prompt.js";
 import { handleVoiceMessage } from "./handlers/voice.js";
 import { handleDocumentMessage } from "./handlers/document.js";
 import { handlePhotoMessage } from "./handlers/photo.js";
@@ -114,6 +120,10 @@ import {
   backgroundSessionTracker,
   type BackgroundSessionNotification,
 } from "../background-session/tracker.js";
+import { getSessionRouteTarget } from "../topic/manager.js";
+import { getScopeFromContext, getThreadSendOptions } from "./scope.js";
+import { syncTopicTitleForSession } from "../topic/title-sync.js";
+import { ensureGeneralTopicName } from "./middleware/general-topic-name.js";
 
 let botInstance: Bot<Context> | null = null;
 let chatIdInstance: number | null = null;
@@ -130,6 +140,31 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const TEMP_DIR = path.join(__dirname, "..", ".tmp");
 const sessionCompletionTasks = new Map<string, Promise<void>>();
+const telegramRateLimiter = new TelegramRateLimiter();
+
+interface SessionDeliveryTarget {
+  chatId: number;
+  threadId: number | null;
+  scopeKey?: string;
+}
+
+function getSessionDeliveryTarget(sessionId: string): SessionDeliveryTarget | null {
+  const topicTarget = getSessionRouteTarget(sessionId);
+  if (topicTarget) {
+    return topicTarget;
+  }
+
+  const currentSession = getCurrentSession();
+  if (!chatIdInstance || currentSession?.id !== sessionId) {
+    return null;
+  }
+
+  return { chatId: chatIdInstance, threadId: null };
+}
+
+function isCurrentOrRoutableSession(sessionId: string): boolean {
+  return getSessionDeliveryTarget(sessionId) !== null;
+}
 
 function getCurrentReplyKeyboard() {
   if (!keyboardManager.isInitialized()) {
@@ -177,29 +212,30 @@ function enqueueSessionCompletionTask(sessionId: string, task: () => Promise<voi
 
 const toolMessageBatcher = new ToolMessageBatcher({
   sendText: async (sessionId, text) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
       return;
     }
 
-    const keyboard = getCurrentReplyKeyboard();
+    const keyboard = target.scopeKey ? keyboardManager.getKeyboard(target.scopeKey) : getCurrentReplyKeyboard();
 
-    await botInstance.api.sendMessage(chatIdInstance, text, {
+    await botInstance.api.sendMessage(target.chatId, text, {
       disable_notification: true,
       ...(keyboard ? { reply_markup: keyboard } : {}),
+      ...getThreadSendOptions(target.threadId),
     });
   },
   sendFile: async (sessionId, fileData) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
       return;
     }
 
@@ -213,12 +249,13 @@ const toolMessageBatcher = new ToolMessageBatcher({
       await fs.mkdir(TEMP_DIR, { recursive: true });
       await fs.writeFile(tempFilePath, fileData.buffer);
 
-      const keyboard = getCurrentReplyKeyboard();
+      const keyboard = target.scopeKey ? keyboardManager.getKeyboard(target.scopeKey) : getCurrentReplyKeyboard();
 
-      await botInstance.api.sendDocument(chatIdInstance, new InputFile(tempFilePath), {
+      await botInstance.api.sendDocument(target.chatId, new InputFile(tempFilePath), {
         caption: fileData.caption,
         disable_notification: true,
         ...(keyboard ? { reply_markup: keyboard } : {}),
+        ...getThreadSendOptions(target.threadId),
       });
     } finally {
       await fs.unlink(tempFilePath).catch(() => {});
@@ -228,27 +265,40 @@ const toolMessageBatcher = new ToolMessageBatcher({
 
 const responseStreamer = new ResponseStreamer({
   throttleMs: RESPONSE_STREAM_THROTTLE_MS,
-  sendPart: async (part, options) => {
-    if (!botInstance || !chatIdInstance || chatIdInstance <= 0) {
+  sendPart: async (sessionId, part, options) => {
+    if (!botInstance) {
       throw new Error("Bot context missing for streamed send");
+    }
+
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
+      throw new Error(`No Telegram target for streamed send: ${sessionId}`);
     }
 
     return sendRenderedBotPart({
       api: botInstance.api,
-      chatId: chatIdInstance,
+      chatId: target.chatId,
       part,
-      options,
+      options: {
+        ...options,
+        ...getThreadSendOptions(target.threadId),
+      },
     });
   },
-  editPart: async (messageId, part, options) => {
-    if (!botInstance || !chatIdInstance || chatIdInstance <= 0) {
+  editPart: async (sessionId, messageId, part, options) => {
+    if (!botInstance) {
       throw new Error("Bot context missing for streamed edit");
+    }
+
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
+      throw new Error(`No Telegram target for streamed edit: ${sessionId}`);
     }
 
     try {
       return await editRenderedBotPart({
         api: botInstance.api,
-        chatId: chatIdInstance,
+        chatId: target.chatId,
         messageId,
         part,
         options,
@@ -265,12 +315,17 @@ const responseStreamer = new ResponseStreamer({
       throw error;
     }
   },
-  deleteText: async (messageId) => {
-    if (!botInstance || !chatIdInstance || chatIdInstance <= 0) {
+  deleteText: async (sessionId, messageId) => {
+    if (!botInstance) {
       throw new Error("Bot context missing for streamed delete");
     }
 
-    await botInstance.api.deleteMessage(chatIdInstance, messageId).catch((error) => {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
+      throw new Error(`No Telegram target for streamed delete: ${sessionId}`);
+    }
+
+    await botInstance.api.deleteMessage(target.chatId, messageId).catch((error) => {
       const errorMessage =
         error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
       if (
@@ -288,33 +343,34 @@ const responseStreamer = new ResponseStreamer({
 const toolCallStreamer = new ToolCallStreamer({
   throttleMs: RESPONSE_STREAM_THROTTLE_MS,
   sendText: async (sessionId, text) => {
-    if (!botInstance || !chatIdInstance || chatIdInstance <= 0) {
+    if (!botInstance) {
       throw new Error("Bot context missing for tool stream send");
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
       throw new Error(`Tool stream session mismatch for send: ${sessionId}`);
     }
 
-    const sentMessage = await botInstance.api.sendMessage(chatIdInstance, text, {
+    const sentMessage = await botInstance.api.sendMessage(target.chatId, text, {
       disable_notification: true,
+      ...getThreadSendOptions(target.threadId),
     });
 
     return sentMessage.message_id;
   },
   editText: async (sessionId, messageId, text) => {
-    if (!botInstance || !chatIdInstance || chatIdInstance <= 0) {
+    if (!botInstance) {
       throw new Error("Bot context missing for tool stream edit");
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
       throw new Error(`Tool stream session mismatch for edit: ${sessionId}`);
     }
 
     try {
-      await botInstance.api.editMessageText(chatIdInstance, messageId, text);
+      await botInstance.api.editMessageText(target.chatId, messageId, text);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -326,16 +382,16 @@ const toolCallStreamer = new ToolCallStreamer({
     }
   },
   deleteText: async (sessionId, messageId) => {
-    if (!botInstance || !chatIdInstance || chatIdInstance <= 0) {
+    if (!botInstance) {
       throw new Error("Bot context missing for tool stream delete");
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
       throw new Error(`Tool stream session mismatch for delete: ${sessionId}`);
     }
 
-    await botInstance.api.deleteMessage(chatIdInstance, messageId).catch((error) => {
+    await botInstance.api.deleteMessage(target.chatId, messageId).catch((error) => {
       const errorMessage =
         error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
       if (
@@ -488,8 +544,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    if (!isCurrentOrRoutableSession(sessionId)) {
       return;
     }
 
@@ -518,8 +573,8 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         return;
       }
 
-      const currentSession = getCurrentSession();
-      if (currentSession?.id !== sessionId) {
+      const target = getSessionDeliveryTarget(sessionId);
+      if (!target) {
         clearPromptResponseMode(sessionId);
         responseStreamer.clearMessage(sessionId, messageId, "session_mismatch");
         toolCallStreamer.clearSession(sessionId, "session_mismatch");
@@ -530,7 +585,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       }
 
       const botApi = botInstance.api;
-      const chatId = chatIdInstance;
+      const chatId = target.chatId;
 
       try {
         assistantRunState.markResponseCompleted(sessionId, {
@@ -557,7 +612,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
               api: botApi,
               chatId,
               part,
-              options: options as Parameters<typeof sendBotText>[0]["options"],
+              options: {
+                ...(options as Parameters<typeof sendBotText>[0]["options"]),
+                ...getThreadSendOptions(target.threadId),
+              },
             });
           },
         });
@@ -566,6 +624,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
           api: botApi,
           sessionId,
           chatId,
+          threadId: target.threadId,
           text: messageText,
         });
       } catch (err) {
@@ -610,8 +669,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== toolInfo.sessionId) {
+    if (!isCurrentOrRoutableSession(toolInfo.sessionId)) {
       return;
     }
 
@@ -646,8 +704,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    if (!isCurrentOrRoutableSession(sessionId)) {
       return;
     }
 
@@ -674,8 +731,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== fileInfo.sessionId) {
+    if (!isCurrentOrRoutableSession(fileInfo.sessionId)) {
       return;
     }
 
@@ -704,30 +760,30 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
       return;
     }
 
     await Promise.all([
-      toolMessageBatcher.flushSession(currentSession.id, "question_asked"),
-      toolCallStreamer.flushSession(currentSession.id, "question_asked"),
+      toolMessageBatcher.flushSession(sessionId, "question_asked"),
+      toolCallStreamer.flushSession(sessionId, "question_asked"),
     ]);
 
-    if (questionManager.isActive()) {
+    if (questionManager.isActive(target.scopeKey)) {
       logger.warn("[Bot] Replacing active poll with a new one");
 
-      const previousMessageIds = questionManager.getMessageIds();
+      const previousMessageIds = questionManager.getMessageIds(target.scopeKey);
       for (const messageId of previousMessageIds) {
-        await botInstance.api.deleteMessage(chatIdInstance, messageId).catch(() => {});
+        await botInstance.api.deleteMessage(target.chatId, messageId).catch(() => {});
       }
 
-      clearAllInteractionState("question_replaced_by_new_poll");
+      clearAllInteractionState("question_replaced_by_new_poll", target.scopeKey);
     }
 
     logger.info(`[Bot] Received ${questions.length} questions from agent, requestID=${requestID}`);
-    questionManager.startQuestions(questions, requestID);
-    await showCurrentQuestion(botInstance.api, chatIdInstance);
+    questionManager.startQuestions(questions, requestID, target.scopeKey);
+    await showCurrentQuestion(botInstance.api, target.chatId, target.scopeKey, target.threadId);
   });
 
   summaryAggregator.setOnQuestionError(async () => {
@@ -752,8 +808,8 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== request.sessionID) {
+    const target = getSessionDeliveryTarget(request.sessionID);
+    if (!target) {
       return;
     }
 
@@ -765,7 +821,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     logger.info(
       `[Bot] Received permission request from agent: type=${request.permission}, requestID=${request.id}`,
     );
-    await showPermissionRequest(botInstance.api, chatIdInstance, request);
+    await showPermissionRequest(botInstance.api, target.chatId, request, target.scopeKey, target.threadId);
   });
 
   summaryAggregator.setOnThinking(async (sessionId) => {
@@ -773,8 +829,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    if (!isCurrentOrRoutableSession(sessionId)) {
       return;
     }
 
@@ -788,13 +843,15 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
     // Refresh pinned message so it shows the latest in-memory context
     // (accumulated from silent token updates). 1 API call per thinking event.
-    if (pinnedMessageManager.isInitialized()) {
-      await pinnedMessageManager.refresh();
+    const target = getSessionDeliveryTarget(sessionId);
+    if (target && pinnedMessageManager.isInitialized(target.scopeKey)) {
+      await pinnedMessageManager.refresh(target.scopeKey);
     }
   });
 
-  summaryAggregator.setOnTokens(async (tokens, isCompleted) => {
-    if (!pinnedMessageManager.isInitialized()) {
+  summaryAggregator.setOnTokens(async (sessionId, tokens, isCompleted) => {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target || !pinnedMessageManager.isInitialized(target.scopeKey)) {
       return;
     }
 
@@ -804,7 +861,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       );
 
       const contextSize = tokens.input + tokens.cacheRead;
-      const contextLimit = pinnedMessageManager.getContextLimit();
+      const contextLimit = pinnedMessageManager.getContextLimit(target.scopeKey);
 
       // Skip non-completed messages with zero context: a new assistant message
       // starts with tokens={input:0, ...} which would overwrite valid context
@@ -816,40 +873,42 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
       // Update both keyboard and pinned state in memory (keeps them in sync)
       if (contextLimit > 0) {
-        keyboardManager.updateContext(contextSize, contextLimit);
+        keyboardManager.updateContext(contextSize, contextLimit, target.scopeKey);
       }
-      pinnedMessageManager.updateTokensSilent(tokens);
+      pinnedMessageManager.updateTokensSilent(tokens, target.scopeKey);
 
       // Full pinned message update (API call) only on completed messages
       if (isCompleted) {
-        await pinnedMessageManager.onMessageComplete(tokens);
+        await pinnedMessageManager.onMessageComplete(tokens, target.scopeKey);
       }
     } catch (err) {
       logger.error("[Bot] Error updating pinned message with tokens:", err);
     }
   });
 
-  summaryAggregator.setOnCost(async (cost) => {
-    if (!pinnedMessageManager.isInitialized()) {
+  summaryAggregator.setOnCost(async (sessionId, cost) => {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target || !pinnedMessageManager.isInitialized(target.scopeKey)) {
       return;
     }
 
     try {
       logger.debug(`[Bot] Cost update: $${cost.toFixed(2)}`);
-      await pinnedMessageManager.onCostUpdate(cost);
+      await pinnedMessageManager.onCostUpdate(cost, target.scopeKey);
     } catch (err) {
       logger.error("[Bot] Error updating cost:", err);
     }
   });
 
   summaryAggregator.setOnSessionCompacted(async (sessionId, directory) => {
-    if (!pinnedMessageManager.isInitialized()) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target || !pinnedMessageManager.isInitialized(target.scopeKey)) {
       return;
     }
 
     try {
       logger.info(`[Bot] Session compacted, reloading context: ${sessionId}`);
-      await pinnedMessageManager.onSessionCompacted(sessionId, directory);
+      await pinnedMessageManager.onSessionCompacted(sessionId, directory, target.scopeKey);
     } catch (err) {
       logger.error("[Bot] Error reloading context after compaction:", err);
     }
@@ -867,10 +926,11 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
       foregroundSessionState.markIdle(sessionId);
       await scheduledTaskRuntime.flushDeferredDeliveries();
+      await dispatchNextQueuedPrompt(sessionId);
       return;
     }
 
@@ -886,9 +946,9 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         const modelID = completedRun.actualModelID || completedRun.configuredModelID;
 
         if (agent && providerID && modelID) {
-          const keyboard = getCurrentReplyKeyboard();
+          const keyboard = target.scopeKey ? keyboardManager.getKeyboard(target.scopeKey) : getCurrentReplyKeyboard();
           await botInstance.api.sendMessage(
-            chatIdInstance,
+            target.chatId,
             formatAssistantRunFooter({
               agent,
               providerID,
@@ -897,6 +957,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
             }),
             {
               ...(keyboard ? { reply_markup: keyboard } : {}),
+              ...getThreadSendOptions(target.threadId),
             },
           );
         }
@@ -906,6 +967,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     } finally {
       foregroundSessionState.markIdle(sessionId);
       await scheduledTaskRuntime.flushDeferredDeliveries();
+      await dispatchNextQueuedPrompt(sessionId);
     }
   });
 
@@ -918,8 +980,8 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target) {
       clearPromptResponseMode(sessionId);
       responseStreamer.clearSession(sessionId, "session_error_not_current");
       toolCallStreamer.clearSession(sessionId, "session_error_not_current");
@@ -944,7 +1006,9 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         : normalizedMessage;
 
     await botInstance.api
-      .sendMessage(chatIdInstance, t("bot.session_error", { message: truncatedMessage }))
+      .sendMessage(target.chatId, t("bot.session_error", { message: truncatedMessage }), {
+        ...getThreadSendOptions(target.threadId),
+      })
       .catch((err) => {
         logger.error("[Bot] Failed to send session.error message:", err);
       });
@@ -958,8 +1022,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    if (!isCurrentOrRoutableSession(sessionId)) {
       return;
     }
 
@@ -973,29 +1036,31 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     toolCallStreamer.replaceByPrefix(sessionId, SESSION_RETRY_PREFIX, retryMessage);
   });
 
-  summaryAggregator.setOnSessionDiff(async (_sessionId, diffs) => {
-    if (!pinnedMessageManager.isInitialized()) {
+  summaryAggregator.setOnSessionDiff(async (sessionId, diffs) => {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target || !pinnedMessageManager.isInitialized(target.scopeKey)) {
       return;
     }
 
     try {
-      await pinnedMessageManager.onSessionDiff(diffs);
+      await pinnedMessageManager.onSessionDiff(diffs, target.scopeKey);
     } catch (err) {
       logger.error("[Bot] Error updating session diff:", err);
     }
   });
 
-  summaryAggregator.setOnFileChange((change) => {
-    if (!pinnedMessageManager.isInitialized()) {
+  summaryAggregator.setOnFileChange((sessionId, change) => {
+    const target = getSessionDeliveryTarget(sessionId);
+    if (!target || !pinnedMessageManager.isInitialized(target.scopeKey)) {
       return;
     }
-    pinnedMessageManager.addFileChange(change);
+    pinnedMessageManager.addFileChange(change, target.scopeKey);
   });
 
-  pinnedMessageManager.setOnKeyboardUpdate(async (tokensUsed, tokensLimit) => {
+  pinnedMessageManager.setOnKeyboardUpdate(async (tokensUsed, tokensLimit, scopeKey) => {
     try {
       logger.debug(`[Bot] Updating keyboard with context: ${tokensUsed}/${tokensLimit}`);
-      keyboardManager.updateContext(tokensUsed, tokensLimit);
+      keyboardManager.updateContext(tokensUsed, tokensLimit, scopeKey);
       // Don't send automatic keyboard updates - keyboard will update naturally with user messages
     } catch (err) {
       logger.error("[Bot] Error updating keyboard context:", err);
@@ -1020,13 +1085,21 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
     if (event.type === "session.created" || event.type === "session.updated") {
       const info = (
-        event.properties as { info?: { directory?: string; time?: { updated?: number } } }
+        event.properties as { info?: { id?: string; title?: string; directory?: string; time?: { updated?: number } } }
       ).info;
 
       if (info?.directory) {
         safeBackgroundTask({
           taskName: `session.cache.${event.type}`,
           task: () => ingestSessionInfoForCache(info),
+        });
+      }
+
+      if (event.type === "session.updated" && info?.id && info.title && botInstance) {
+        const api = botInstance.api;
+        safeBackgroundTask({
+          taskName: "topic.title.sync",
+          task: () => syncTopicTitleForSession(api, info.id!, info.title!),
         });
       }
     }
@@ -1107,15 +1180,7 @@ export function createBot(): Bot<Context> {
       logger.debug(`[Bot API] sendMessage to chat ${(payload as { chat_id?: number }).chat_id}`);
     }
 
-    return withTelegramRateLimitRetry(() => prev(method, payload, signal), {
-      maxRetries: 5,
-      onRetry: ({ attempt, retryAfterMs, error }) => {
-        logger.warn(
-          `[Bot API] Telegram rate limit on ${method}, retrying in ${retryAfterMs}ms (attempt=${attempt})`,
-          error,
-        );
-      },
-    });
+    return telegramRateLimiter.enqueue(method, payload, () => prev(method, payload, signal));
   });
 
   bot.use((ctx, next) => {
@@ -1129,7 +1194,12 @@ export function createBot(): Bot<Context> {
   });
 
   bot.use(authMiddleware);
+  bot.use(async (ctx, next) => {
+    await ensureGeneralTopicName(ctx);
+    return next();
+  });
   bot.use(ensureCommandsInitialized);
+  bot.use(scheduledOutputTopicMiddleware);
   bot.use(interactionGuardMiddleware);
 
   const blockMenuWhileInteractionActive = async (ctx: Context): Promise<boolean> => {
@@ -1148,6 +1218,7 @@ export function createBot(): Bot<Context> {
   bot.command("start", startCommand);
   bot.command("help", helpCommand);
   bot.command("status", statusCommand);
+  bot.command("last", lastCommand);
   bot.command("tts", ttsCommand);
   bot.command("opencode_start", opencodeStartCommand);
   bot.command("opencode_stop", opencodeStopCommand);
@@ -1384,12 +1455,13 @@ export function createBot(): Bot<Context> {
 
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
+    const scopeKey = getScopeFromContext(ctx)?.key;
 
     if (text.startsWith("/")) {
       return;
     }
 
-    if (questionManager.isActive()) {
+    if (questionManager.isActive(scopeKey)) {
       await handleQuestionTextAnswer(ctx);
       return;
     }

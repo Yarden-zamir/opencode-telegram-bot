@@ -1,6 +1,7 @@
 import type { ParsedTaskSchedule, ScheduledTaskModel, TaskCreationState } from "./types.js";
 import { cloneParsedTaskSchedule, cloneScheduledTaskModel } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { GLOBAL_SCOPE_KEY } from "../bot/scope.js";
 
 function cloneState(state: TaskCreationState): TaskCreationState {
   return {
@@ -11,10 +12,18 @@ function cloneState(state: TaskCreationState): TaskCreationState {
 }
 
 class TaskCreationManager {
-  private state: TaskCreationState | null = null;
+  private states = new Map<string, TaskCreationState>();
 
-  start(projectId: string, projectWorktree: string, model: ScheduledTaskModel): TaskCreationState {
-    this.state = {
+  private normalizeScopeKey(scopeKey?: string): string {
+    return scopeKey ?? GLOBAL_SCOPE_KEY;
+  }
+
+  private getMutableState(scopeKey?: string): TaskCreationState | null {
+    return this.states.get(this.normalizeScopeKey(scopeKey)) ?? null;
+  }
+
+  start(projectId: string, projectWorktree: string, model: ScheduledTaskModel, scopeKey?: string): TaskCreationState {
+    const nextState: TaskCreationState = {
       stage: "awaiting_schedule",
       projectId,
       projectWorktree,
@@ -25,43 +34,47 @@ class TaskCreationManager {
       previewMessageId: null,
       promptRequestMessageId: null,
     };
+    this.states.set(this.normalizeScopeKey(scopeKey), nextState);
 
     logger.info(`[TaskCreationManager] Started task creation flow for project=${projectWorktree}`);
 
-    return cloneState(this.state);
+    return cloneState(nextState);
   }
 
-  isActive(): boolean {
-    return this.state !== null;
+  isActive(scopeKey?: string): boolean {
+    return this.getMutableState(scopeKey) !== null;
   }
 
-  isWaitingForSchedule(): boolean {
-    return this.state?.stage === "awaiting_schedule";
+  isWaitingForSchedule(scopeKey?: string): boolean {
+    return this.getMutableState(scopeKey)?.stage === "awaiting_schedule";
   }
 
-  isParsingSchedule(): boolean {
-    return this.state?.stage === "parsing_schedule";
+  isParsingSchedule(scopeKey?: string): boolean {
+    return this.getMutableState(scopeKey)?.stage === "parsing_schedule";
   }
 
-  isWaitingForPrompt(): boolean {
-    return this.state?.stage === "awaiting_prompt";
+  isWaitingForPrompt(scopeKey?: string): boolean {
+    return this.getMutableState(scopeKey)?.stage === "awaiting_prompt";
   }
 
-  getState(): TaskCreationState | null {
-    return this.state ? cloneState(this.state) : null;
+  getState(scopeKey?: string): TaskCreationState | null {
+    const state = this.getMutableState(scopeKey);
+    return state ? cloneState(state) : null;
   }
 
   setParsedSchedule(
     scheduleText: string,
     parsedSchedule: ParsedTaskSchedule,
     previewMessageId: number,
+    scopeKey?: string,
   ): TaskCreationState | null {
-    if (!this.state) {
+    const state = this.getMutableState(scopeKey);
+    if (!state) {
       return null;
     }
 
-    this.state = {
-      ...this.state,
+    const nextState: TaskCreationState = {
+      ...state,
       stage: "awaiting_prompt",
       scheduleText,
       parsedSchedule: cloneParsedTaskSchedule(parsedSchedule),
@@ -69,60 +82,68 @@ class TaskCreationManager {
       previewMessageId,
       promptRequestMessageId: null,
     };
+    this.states.set(this.normalizeScopeKey(scopeKey), nextState);
 
     logger.info("[TaskCreationManager] Parsed schedule and switched flow to prompt input");
 
-    return cloneState(this.state);
+    return cloneState(nextState);
   }
 
-  markScheduleParsing(): TaskCreationState | null {
-    if (!this.state) {
+  markScheduleParsing(scopeKey?: string): TaskCreationState | null {
+    const state = this.getMutableState(scopeKey);
+    if (!state) {
       return null;
     }
 
-    this.state = {
-      ...this.state,
+    const nextState: TaskCreationState = {
+      ...state,
       stage: "parsing_schedule",
     };
+    this.states.set(this.normalizeScopeKey(scopeKey), nextState);
 
     logger.info("[TaskCreationManager] Schedule parsing started");
 
-    return cloneState(this.state);
+    return cloneState(nextState);
   }
 
-  setPromptRequestMessageId(messageId: number): TaskCreationState | null {
-    if (!this.state) {
+  setPromptRequestMessageId(messageId: number, scopeKey?: string): TaskCreationState | null {
+    const state = this.getMutableState(scopeKey);
+    if (!state) {
       return null;
     }
 
-    this.state = {
-      ...this.state,
+    const nextState: TaskCreationState = {
+      ...state,
       promptRequestMessageId: messageId,
     };
+    this.states.set(this.normalizeScopeKey(scopeKey), nextState);
 
-    return cloneState(this.state);
+    return cloneState(nextState);
   }
 
-  setScheduleRequestMessageId(messageId: number): TaskCreationState | null {
-    if (!this.state) {
+  setScheduleRequestMessageId(messageId: number, scopeKey?: string): TaskCreationState | null {
+    const state = this.getMutableState(scopeKey);
+    if (!state) {
       return null;
     }
 
-    this.state = {
-      ...this.state,
+    const nextState: TaskCreationState = {
+      ...state,
       scheduleRequestMessageId: messageId,
     };
+    this.states.set(this.normalizeScopeKey(scopeKey), nextState);
 
-    return cloneState(this.state);
+    return cloneState(nextState);
   }
 
-  resetSchedule(): TaskCreationState | null {
-    if (!this.state) {
+  resetSchedule(scopeKey?: string): TaskCreationState | null {
+    const state = this.getMutableState(scopeKey);
+    if (!state) {
       return null;
     }
 
-    this.state = {
-      ...this.state,
+    const nextState: TaskCreationState = {
+      ...state,
       stage: "awaiting_schedule",
       scheduleText: null,
       parsedSchedule: null,
@@ -130,19 +151,21 @@ class TaskCreationManager {
       previewMessageId: null,
       promptRequestMessageId: null,
     };
+    this.states.set(this.normalizeScopeKey(scopeKey), nextState);
 
     logger.info("[TaskCreationManager] Reset task creation flow back to schedule input");
 
-    return cloneState(this.state);
+    return cloneState(nextState);
   }
 
-  clear(): void {
-    if (!this.state) {
+  clear(scopeKey?: string): void {
+    const normalizedScopeKey = this.normalizeScopeKey(scopeKey);
+    if (!this.states.has(normalizedScopeKey)) {
       return;
     }
 
     logger.debug("[TaskCreationManager] Clearing task creation state");
-    this.state = null;
+    this.states.delete(normalizedScopeKey);
   }
 }
 

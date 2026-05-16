@@ -4,6 +4,7 @@ export const en = {
   "cmd.description.stop": "Stop current action",
   "cmd.description.detach": "Detach from current session",
   "cmd.description.sessions": "List sessions",
+  "cmd.description.last": "Show latest session reply",
   "cmd.description.tts": "Toggle audio replies",
   "cmd.description.projects": "List projects",
   "cmd.description.worktree": "Switch git worktrees",
@@ -68,13 +69,20 @@ export const en = {
   "bot.session_created": "✅ Session created: {title}",
   "bot.session_busy":
     "⏳ Agent is already running a task. Wait for completion or use /abort to interrupt current run.",
+  "bot.session_queued":
+    "📝 Your message was queued for this session.\n\nQueue position: {position}\nWhat happens next: it will start automatically after the current run finishes.",
+  "bot.session_queue_started":
+    "▶️ Starting the next queued message for this session.\n\nQueued message:\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ Active session does not match the selected project, so it was reset. Use /sessions to pick one or /new to create a new session.",
   "bot.prompt_send_error": "Failed to send request to OpenCode.",
+  "bot.prompt_send_error_session_not_found":
+    "Failed to send request because the OpenCode session no longer exists. Use /sessions or /new to continue.",
   "bot.session_error": "🔴 OpenCode returned an error: {message}",
   "bot.session_retry":
     "🔁 {message}\n\nProvider keeps returning the same error on repeated retries. Use /abort to abort.",
   "bot.external_user_input": "External user input",
+  "topic.unbound": "⚠️ This topic is not linked to any session. Go to General topic and run /new.",
   "background.session_fallback": "session {id}",
   "background.assistant_response": "🔔 Assistant replied in background session: {session}",
   "background.question_asked": "❓ Background session needs an answer: {session}",
@@ -151,11 +159,19 @@ export const en = {
   "sessions.button.next_page": "Next ➡️",
   "sessions.loading_context": "⏳ Loading context and latest messages...",
   "sessions.selected": "✅ Session selected: {title}",
+  "sessions.bound_topic_link":
+    "Session already has a topic: {title}\nTopic: {topic}\n{url}",
+  "sessions.created_topic_link": "Created topic for session: {title}\nTopic: {topic}\n{url}",
   "sessions.select_error": "🔴 Failed to select session.",
   "sessions.preview.empty": "No recent messages.",
   "sessions.preview.title": "Recent messages:",
   "sessions.preview.you": "You:",
   "sessions.preview.agent": "Agent:",
+
+  "last.title": "Latest message",
+  "last.session_not_selected": "💬 Session is not selected. Choose one with /sessions.",
+  "last.empty": "No recent messages.",
+  "last.fetch_error": "🔴 Failed to load latest session message.",
 
   "attach.project_not_selected":
     "🏗 Project is not selected.\n\nFirst select a project with /projects.",
@@ -184,6 +200,13 @@ export const en = {
   "new.created": "✅ New session created: {title}",
   "new.create_error":
     "🔴 OpenCode Server is unavailable or an error occurred while creating session.",
+  "new.topic_only_in_general": "Create new forum-topic sessions from the General topic.",
+  "new.topic_create_error": "🔴 Failed to create the session topic.",
+  "new.topic_create_no_rights":
+    "🔴 I do not have permission to create forum topics in this group.",
+  "new.topic_created": "✅ Session topic ready: {title}",
+  "new.general_created": "✅ New session topic created.",
+  "new.general_open_link": "Open it here: {url}",
 
   "stop.no_active_session":
     "🛑 Agent was not started\n\nCreate a session with /new or select one via /sessions.",
@@ -409,6 +432,11 @@ export const en = {
   "task.prompt_empty": "⚠️ Task text cannot be empty.",
   "task.created":
     "✅ Scheduled task created\n\nTask: {description}\nProject: {project}\nModel: {model}\nSchedule: {schedule}\n{cronLine}Next run: {nextRunAt}",
+  "task.created_topic_link": "Scheduled task output topic: {url}",
+  "task.output_topic_commands_only":
+    "This topic is reserved for scheduled task output. Use the main chat for bot commands.",
+  "task.output_topic_blocked":
+    "This topic is reserved for scheduled task output. Go to the Session Control topic to start or continue a coding session.",
   "task.created.cron": "Cron: {cron}",
   "task.button.retry_schedule": "🔁 Re-enter schedule",
   "task.button.cancel": "❌ Cancel",

@@ -14,6 +14,21 @@ const mocked = vi.hoisted(() => ({
   currentSession: null as { id: string; title: string; directory: string } | null,
   abortMock: vi.fn(),
   statusMock: vi.fn(),
+  updateTopicBindingStatusBySessionIdMock: vi.fn(),
+}));
+
+vi.mock("../../../src/settings/manager.js", () => ({
+  TOPIC_SESSION_STATUS: {
+    ACTIVE: "active",
+    CLOSED: "closed",
+    STALE: "stale",
+    ABANDONED: "abandoned",
+    ERROR: "error",
+  },
+}));
+
+vi.mock("../../../src/topic/manager.js", () => ({
+  updateTopicBindingStatusBySessionId: mocked.updateTopicBindingStatusBySessionIdMock,
 }));
 
 vi.mock("../../../src/session/manager.js", () => ({
@@ -64,6 +79,7 @@ describe("bot/commands/abort", () => {
     mocked.currentSession = null;
     mocked.abortMock.mockReset();
     mocked.statusMock.mockReset();
+    mocked.updateTopicBindingStatusBySessionIdMock.mockReset();
   });
 
   it("clears interaction state even when there is no active session", async () => {
@@ -162,5 +178,35 @@ describe("bot/commands/abort", () => {
     expect(permissionManager.isActive()).toBe(false);
     expect(renameManager.isWaitingForName()).toBe(false);
     expect(interactionManager.getSnapshot()).toBeNull();
+  });
+
+  it("marks the bound topic session abandoned when abort starts", async () => {
+    mocked.currentSession = {
+      id: "session-1",
+      title: "Session",
+      directory: "D:/repo",
+    };
+    mocked.abortMock.mockResolvedValue({ data: true, error: null });
+    mocked.statusMock.mockResolvedValue({
+      data: {
+        "session-1": { type: "idle" },
+      },
+      error: null,
+    });
+
+    const ctx = {
+      chat: { id: 777 },
+      reply: vi.fn().mockResolvedValue({ message_id: 88 }),
+      api: {
+        editMessageText: vi.fn().mockResolvedValue(undefined),
+      },
+    } as unknown as Context;
+
+    await abortCommand(ctx as never);
+
+    expect(mocked.updateTopicBindingStatusBySessionIdMock).toHaveBeenCalledWith(
+      "session-1",
+      "abandoned",
+    );
   });
 });

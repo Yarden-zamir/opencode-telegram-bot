@@ -20,6 +20,9 @@ const mocked = vi.hoisted(() => ({
   sessionGetMock: vi.fn(),
   sessionMessagesMock: vi.fn(),
   setCurrentSessionMock: vi.fn(),
+  setCurrentProjectMock: vi.fn(),
+  setCurrentAgentMock: vi.fn(),
+  setCurrentModelMock: vi.fn(),
   clearSummaryMock: vi.fn(),
   clearInteractionMock: vi.fn(),
   keyboardInitializeMock: vi.fn(),
@@ -32,7 +35,11 @@ const mocked = vi.hoisted(() => ({
   pinnedOnSessionChangeMock: vi.fn(),
   pinnedLoadContextFromHistoryMock: vi.fn(),
   pinnedGetContextInfoMock: vi.fn(() => null),
+  getStoredAgentMock: vi.fn(() => "build"),
   resolveProjectAgentMock: vi.fn(async () => "build"),
+  getStoredModelMock: vi.fn(() => ({ providerID: "openai", modelID: "gpt-5", variant: "default" })),
+  getTopicBindingBySessionIdMock: vi.fn(),
+  registerTopicSessionBindingMock: vi.fn(),
   attachToSessionMock: vi.fn(),
   ensureEventSubscriptionMock: vi.fn(),
 }));
@@ -49,6 +56,16 @@ vi.mock("../../../src/opencode/client.js", () => ({
 
 vi.mock("../../../src/settings/manager.js", () => ({
   getCurrentProject: vi.fn(() => mocked.currentProject),
+  setCurrentProject: mocked.setCurrentProjectMock,
+  setCurrentAgent: mocked.setCurrentAgentMock,
+  setCurrentModel: mocked.setCurrentModelMock,
+  TOPIC_SESSION_STATUS: {
+    ACTIVE: "active",
+    CLOSED: "closed",
+    STALE: "stale",
+    ABANDONED: "abandoned",
+    ERROR: "error",
+  },
 }));
 
 vi.mock("../../../src/session/manager.js", () => ({
@@ -76,7 +93,17 @@ vi.mock("../../../src/keyboard/manager.js", () => ({
 }));
 
 vi.mock("../../../src/agent/manager.js", () => ({
+  getStoredAgent: mocked.getStoredAgentMock,
   resolveProjectAgent: mocked.resolveProjectAgentMock,
+}));
+
+vi.mock("../../../src/model/manager.js", () => ({
+  getStoredModel: mocked.getStoredModelMock,
+}));
+
+vi.mock("../../../src/topic/manager.js", () => ({
+  getTopicBindingBySessionId: mocked.getTopicBindingBySessionIdMock,
+  registerTopicSessionBinding: mocked.registerTopicSessionBindingMock,
 }));
 
 vi.mock("../../../src/pinned/manager.js", () => ({
@@ -184,6 +211,30 @@ function createCallbackContext(data: string, messageId: number): Context {
   } as unknown as Context;
 }
 
+function createGeneralTopicCallbackContext(data: string, messageId: number): Context {
+  return {
+    chat: { id: -100123, type: "supergroup", is_forum: true },
+    callbackQuery: {
+      data,
+      message: {
+        message_id: messageId,
+        is_topic_message: true,
+      },
+    } as Context["callbackQuery"],
+    answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+    deleteMessage: vi.fn().mockResolvedValue(undefined),
+    editMessageText: vi.fn().mockResolvedValue(undefined),
+    editMessageReplyMarkup: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
+    api: {
+      createForumTopic: vi.fn().mockResolvedValue({ message_thread_id: 42 }),
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 888 }),
+      deleteMessage: vi.fn().mockResolvedValue(true),
+      editMessageText: vi.fn().mockResolvedValue(true),
+    },
+  } as unknown as Context;
+}
+
 function createDeps() {
   return {
     bot: { api: {} } as Bot<Context>,
@@ -212,6 +263,9 @@ describe("bot/commands/sessions", () => {
     mocked.sessionGetMock.mockReset();
     mocked.sessionMessagesMock.mockReset();
     mocked.setCurrentSessionMock.mockReset();
+    mocked.setCurrentProjectMock.mockReset();
+    mocked.setCurrentAgentMock.mockReset();
+    mocked.setCurrentModelMock.mockReset();
     mocked.clearSummaryMock.mockReset();
     mocked.clearInteractionMock.mockReset();
     mocked.keyboardInitializeMock.mockReset();
@@ -232,6 +286,17 @@ describe("bot/commands/sessions", () => {
     mocked.pinnedGetContextInfoMock.mockReturnValue(null);
     mocked.resolveProjectAgentMock.mockReset();
     mocked.resolveProjectAgentMock.mockResolvedValue("build");
+    mocked.getStoredAgentMock.mockReset();
+    mocked.getStoredAgentMock.mockReturnValue("build");
+    mocked.getStoredModelMock.mockReset();
+    mocked.getStoredModelMock.mockReturnValue({
+      providerID: "openai",
+      modelID: "gpt-5",
+      variant: "default",
+    });
+    mocked.getTopicBindingBySessionIdMock.mockReset();
+    mocked.getTopicBindingBySessionIdMock.mockReturnValue(undefined);
+    mocked.registerTopicSessionBindingMock.mockReset();
     mocked.attachToSessionMock.mockReset();
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
@@ -426,6 +491,102 @@ describe("bot/commands/sessions", () => {
       expect.objectContaining({
         taskName: "sessions.sendPreview",
       }),
+    );
+  });
+
+  it("replies with the existing topic link when selecting a bound session from General", async () => {
+    mocked.sessionGetMock.mockResolvedValueOnce({
+      data: createSession(0),
+      error: null,
+    });
+    mocked.getTopicBindingBySessionIdMock.mockReturnValueOnce({
+      scopeKey: "-100123:42",
+      chatId: -100123,
+      threadId: 42,
+      sessionId: "session-1",
+      projectId: "project-1",
+      projectWorktree: "/repo",
+      topicName: "Existing topic",
+      status: "active",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    interactionManager.start({
+      kind: "inline",
+      expectedInput: "callback",
+      metadata: {
+        menuKind: "session",
+        messageId: 456,
+      },
+    });
+
+    const ctx = createGeneralTopicCallbackContext("session:session-1", 456);
+    const handled = await handleSessionSelect(ctx, createDeps());
+
+    expect(handled).toBe(true);
+    expect(ctx.api.createForumTopic).not.toHaveBeenCalled();
+    expect(mocked.attachToSessionMock).not.toHaveBeenCalled();
+    expect(ctx.reply).toHaveBeenCalledWith(
+      expect.stringContaining("https://t.me/c/123/42"),
+      {},
+    );
+  });
+
+  it("creates and binds a topic when selecting an unbound session from General", async () => {
+    mocked.sessionGetMock.mockResolvedValueOnce({
+      data: createSession(0),
+      error: null,
+    });
+
+    interactionManager.start({
+      kind: "inline",
+      expectedInput: "callback",
+      metadata: {
+        menuKind: "session",
+        messageId: 456,
+      },
+    });
+
+    const ctx = createGeneralTopicCallbackContext("session:session-1", 456);
+    const handled = await handleSessionSelect(ctx, createDeps());
+
+    expect(handled).toBe(true);
+    expect(ctx.api.createForumTopic).toHaveBeenCalledWith(-100123, "Session 1", {
+      icon_color: 0x6fb9f0,
+    });
+    expect(mocked.setCurrentProjectMock).toHaveBeenCalledWith(
+      { id: "project-1", worktree: "/repo" },
+      "-100123:42",
+    );
+    expect(mocked.setCurrentSessionMock).toHaveBeenCalledWith(
+      { id: "session-1", title: "Session 1", directory: "/repo" },
+      "-100123:42",
+    );
+    expect(mocked.setCurrentAgentMock).toHaveBeenCalledWith("build", "-100123:42");
+    expect(mocked.setCurrentModelMock).toHaveBeenCalledWith(
+      { providerID: "openai", modelID: "gpt-5", variant: "default" },
+      "-100123:42",
+    );
+    expect(mocked.registerTopicSessionBindingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scopeKey: "-100123:42",
+        chatId: -100123,
+        threadId: 42,
+        sessionId: "session-1",
+        status: "active",
+      }),
+    );
+    expect(mocked.attachToSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: -100123,
+        threadId: 42,
+        scopeKey: "-100123:42",
+      }),
+    );
+    expect(ctx.reply).toHaveBeenCalledWith(
+      expect.stringContaining("https://t.me/c/123/42"),
+      {},
     );
   });
 

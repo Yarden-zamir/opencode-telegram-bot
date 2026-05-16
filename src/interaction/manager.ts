@@ -5,6 +5,7 @@ import type {
   TransitionInteractionOptions,
 } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { GLOBAL_SCOPE_KEY } from "../bot/scope.js";
 
 export const DEFAULT_ALLOWED_INTERACTION_COMMANDS = ["/help", "/status", "/abort", "/detach"] as const;
 
@@ -50,14 +51,19 @@ function cloneState(state: InteractionState): InteractionState {
 }
 
 class InteractionManager {
-  private state: InteractionState | null = null;
+  private states = new Map<string, InteractionState>();
 
-  start(options: StartInteractionOptions): InteractionState {
+  private normalizeScopeKey(scopeKey?: string): string {
+    return scopeKey ?? GLOBAL_SCOPE_KEY;
+  }
+
+  start(options: StartInteractionOptions, scopeKey?: string): InteractionState {
+    const normalizedScopeKey = this.normalizeScopeKey(scopeKey);
     const now = Date.now();
     let expiresAt: number | null = null;
 
-    if (this.state) {
-      this.clear("state_replaced");
+    if (this.states.has(normalizedScopeKey)) {
+      this.clear("state_replaced", normalizedScopeKey);
     }
 
     if (typeof options.expiresInMs === "number") {
@@ -73,80 +79,87 @@ class InteractionManager {
       expiresAt,
     };
 
-    this.state = nextState;
+    this.states.set(normalizedScopeKey, nextState);
 
     logger.info(
-      `[InteractionManager] Started interaction: kind=${nextState.kind}, expectedInput=${nextState.expectedInput}, allowedCommands=${nextState.allowedCommands.join(",") || "none"}`,
+      `[InteractionManager] Started interaction: scope=${normalizedScopeKey}, kind=${nextState.kind}, expectedInput=${nextState.expectedInput}, allowedCommands=${nextState.allowedCommands.join(",") || "none"}`,
     );
 
     return cloneState(nextState);
   }
 
-  get(): InteractionState | null {
-    if (!this.state) {
+  get(scopeKey?: string): InteractionState | null {
+    const state = this.states.get(this.normalizeScopeKey(scopeKey));
+    if (!state) {
       return null;
     }
 
-    return cloneState(this.state);
+    return cloneState(state);
   }
 
-  getSnapshot(): InteractionState | null {
-    return this.get();
+  getSnapshot(scopeKey?: string): InteractionState | null {
+    return this.get(scopeKey);
   }
 
-  isActive(): boolean {
-    return this.state !== null;
+  isActive(scopeKey?: string): boolean {
+    return this.states.has(this.normalizeScopeKey(scopeKey));
   }
 
-  isExpired(referenceTimeMs: number = Date.now()): boolean {
-    if (!this.state || this.state.expiresAt === null) {
+  isExpired(referenceTimeMs: number = Date.now(), scopeKey?: string): boolean {
+    const state = this.states.get(this.normalizeScopeKey(scopeKey));
+    if (!state || state.expiresAt === null) {
       return false;
     }
 
-    return referenceTimeMs >= this.state.expiresAt;
+    return referenceTimeMs >= state.expiresAt;
   }
 
-  transition(options: TransitionInteractionOptions): InteractionState | null {
-    if (!this.state) {
+  transition(options: TransitionInteractionOptions, scopeKey?: string): InteractionState | null {
+    const normalizedScopeKey = this.normalizeScopeKey(scopeKey);
+    const state = this.states.get(normalizedScopeKey);
+    if (!state) {
       return null;
     }
 
     const now = Date.now();
 
-    this.state = {
-      ...this.state,
-      kind: options.kind ?? this.state.kind,
-      expectedInput: options.expectedInput ?? this.state.expectedInput,
+    const nextState = {
+      ...state,
+      kind: options.kind ?? state.kind,
+      expectedInput: options.expectedInput ?? state.expectedInput,
       allowedCommands:
         options.allowedCommands !== undefined
           ? normalizeAllowedCommands(options.allowedCommands)
-          : [...this.state.allowedCommands],
-      metadata: options.metadata ? { ...options.metadata } : { ...this.state.metadata },
+          : [...state.allowedCommands],
+      metadata: options.metadata ? { ...options.metadata } : { ...state.metadata },
       expiresAt:
         options.expiresInMs === undefined
-          ? this.state.expiresAt
+          ? state.expiresAt
           : options.expiresInMs === null
             ? null
             : now + options.expiresInMs,
     };
+    this.states.set(normalizedScopeKey, nextState);
 
     logger.debug(
-      `[InteractionManager] Transitioned interaction: kind=${this.state.kind}, expectedInput=${this.state.expectedInput}, allowedCommands=${this.state.allowedCommands.join(",") || "none"}`,
+      `[InteractionManager] Transitioned interaction: scope=${normalizedScopeKey}, kind=${nextState.kind}, expectedInput=${nextState.expectedInput}, allowedCommands=${nextState.allowedCommands.join(",") || "none"}`,
     );
 
-    return cloneState(this.state);
+    return cloneState(nextState);
   }
 
-  clear(reason: InteractionClearReason = "manual"): void {
-    if (!this.state) {
+  clear(reason: InteractionClearReason = "manual", scopeKey?: string): void {
+    const normalizedScopeKey = this.normalizeScopeKey(scopeKey);
+    const state = this.states.get(normalizedScopeKey);
+    if (!state) {
       return;
     }
 
     logger.info(
-      `[InteractionManager] Cleared interaction: reason=${reason}, kind=${this.state.kind}, expectedInput=${this.state.expectedInput}`,
+      `[InteractionManager] Cleared interaction: scope=${normalizedScopeKey}, reason=${reason}, kind=${state.kind}, expectedInput=${state.expectedInput}`,
     );
 
-    this.state = null;
+    this.states.delete(normalizedScopeKey);
   }
 }
 

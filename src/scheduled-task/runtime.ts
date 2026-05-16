@@ -89,6 +89,7 @@ function buildSuccessDelivery(
     prompt: task.prompt,
     runAt,
     status: "success",
+    ...(task.delivery ? { delivery: task.delivery } : {}),
     notificationText: t("task.run.success", {
       description: normalizeTaskPrompt(task.prompt),
     }),
@@ -113,6 +114,7 @@ function buildErrorDelivery(
     prompt: task.prompt,
     runAt,
     status: "error",
+    ...(task.delivery ? { delivery: task.delivery } : {}),
     notificationText: t("task.run.error", {
       description: normalizeTaskPrompt(task.prompt),
       error: errorMessage,
@@ -488,6 +490,12 @@ export class ScheduledTaskRuntime {
       return false;
     }
 
+    const targetChatId = delivery.delivery?.chatId ?? this.chatId;
+    const targetOptions =
+      typeof delivery.delivery?.threadId === "number"
+        ? { message_thread_id: delivery.delivery.threadId }
+        : undefined;
+
     try {
       const messageParts =
         delivery.status === "success"
@@ -499,19 +507,27 @@ export class ScheduledTaskRuntime {
       for (const part of messageParts) {
         await sendBotText({
           api: this.botApi,
-          chatId: this.chatId,
+          chatId: targetChatId,
           text: part,
           format,
-          ...(suppressResultNotification ? { options: { disable_notification: true } } : {}),
+          ...(targetOptions || suppressResultNotification
+            ? {
+                options: {
+                  ...(targetOptions ?? {}),
+                  ...(suppressResultNotification ? { disable_notification: true } : {}),
+                },
+              }
+            : {}),
         });
       }
 
       if (delivery.status === "success" && delivery.footerText) {
         await sendBotText({
           api: this.botApi,
-          chatId: this.chatId,
+          chatId: targetChatId,
           text: delivery.footerText,
           format: "raw",
+          ...(targetOptions ? { options: targetOptions } : {}),
         });
       }
 

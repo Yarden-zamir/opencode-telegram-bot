@@ -2,9 +2,15 @@ import type { Bot } from "grammy";
 import { CommandContext, Context } from "grammy";
 import { InlineKeyboard } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
-import { resolveProjectAgent } from "../../agent/manager.js";
+import { getStoredAgent, resolveProjectAgent } from "../../agent/manager.js";
 import { setCurrentSession, SessionInfo } from "../../session/manager.js";
-import { getCurrentProject } from "../../settings/manager.js";
+import {
+  TOPIC_SESSION_STATUS,
+  getCurrentProject,
+  setCurrentAgent,
+  setCurrentModel,
+  setCurrentProject,
+} from "../../settings/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { interactionManager } from "../../interaction/manager.js";
 import { keyboardManager } from "../../keyboard/manager.js";
@@ -21,6 +27,21 @@ import { getDateLocale, t } from "../../i18n/index.js";
 import { attachToSession } from "../../attach/service.js";
 import { renderAssistantFinalPartsSafe } from "../utils/assistant-rendering.js";
 import { sendRenderedBotPart } from "../utils/telegram-text.js";
+import {
+  GENERAL_TOPIC_THREAD_ID,
+  SCOPE_CONTEXT,
+  createScopeKeyFromParams,
+  getScopeFromContext,
+  getScopeKeyFromContext,
+  getThreadSendOptions,
+  isTopicScope,
+} from "../scope.js";
+import { getTopicBindingBySessionId, registerTopicSessionBinding } from "../../topic/manager.js";
+import { formatTopicTitle } from "../../topic/title-format.js";
+import { CHAT_TYPE, TELEGRAM_CHAT_FIELD } from "../constants.js";
+import { TOPIC_COLORS } from "../../topic/colors.js";
+import { buildTopicThreadLink } from "../utils/topic-link.js";
+import { getStoredModel } from "../../model/manager.js";
 
 const SESSION_CALLBACK_PREFIX = "session:";
 const SESSION_PAGE_CALLBACK_PREFIX = "session:page:";
@@ -125,6 +146,19 @@ function parseBackgroundSessionCallback(data: string): BackgroundSessionCallback
   return { sessionId, kind };
 }
 
+function isGeneralForumScope(ctx: Context): boolean {
+  const scope = getScopeFromContext(ctx);
+  const isForumEnabled =
+    ctx.chat?.type === CHAT_TYPE.SUPERGROUP &&
+    Reflect.get(ctx.chat, TELEGRAM_CHAT_FIELD.IS_FORUM) === true;
+
+  return Boolean(
+    isForumEnabled &&
+      scope?.context === SCOPE_CONTEXT.GROUP_GENERAL &&
+      (scope.threadId === null || scope.threadId === GENERAL_TOPIC_THREAD_ID),
+  );
+}
+
 async function removeCallbackReplyMarkup(ctx: Context): Promise<void> {
   try {
     await ctx.editMessageReplyMarkup();
@@ -218,7 +252,7 @@ export async function sessionsCommand(ctx: CommandContext<Context>) {
     }
 
     const pageSize = config.bot.sessionsListLimit;
-    const currentProject = getCurrentProject();
+    const currentProject = getCurrentProject(getScopeKeyFromContext(ctx));
 
     if (!currentProject) {
       await ctx.reply(t("sessions.project_not_selected"));
@@ -258,10 +292,12 @@ async function selectSessionById(
   sessionId: string,
   options: SelectSessionByIdOptions,
 ): Promise<void> {
-  const currentProject = getCurrentProject();
+  const scope = getScopeFromContext(ctx);
+  const scopeKey = scope?.key;
+  const currentProject = getCurrentProject(scopeKey);
 
   if (!currentProject) {
-    clearAllInteractionState("session_select_project_missing");
+    clearAllInteractionState("session_select_project_missing", scopeKey);
     await ctx.answerCallbackQuery();
     await ctx.reply(t("sessions.select_project_first"));
     return;
@@ -285,15 +321,100 @@ async function selectSessionById(
     title: session.title,
     directory: currentProject.worktree,
   };
-  setCurrentSession(sessionInfo);
-  clearAllInteractionState("session_switched");
+
+  if (ctx.chat && isGeneralForumScope(ctx)) {
+    const existingBinding = getTopicBindingBySessionId(session.id);
+    if (existingBinding && existingBinding.chatId === ctx.chat.id) {
+      const existingLink = buildTopicThreadLink(ctx.chat, existingBinding.threadId);
+      if (existingLink) {
+        clearAllInteractionState("session_switched", scopeKey);
+        await ctx.answerCallbackQuery();
+        await ctx.reply(
+          t("sessions.bound_topic_link", {
+            title: session.title,
+            topic: existingBinding.topicName ?? String(existingBinding.threadId),
+            url: existingLink,
+          }),
+          getThreadSendOptions(scope?.threadId ?? null),
+        );
+        return;
+      }
+    }
+
+    const topicTitle = formatTopicTitle(session.title, session.title);
+    const createdTopic = await ctx.api.createForumTopic(ctx.chat.id, topicTitle, {
+      icon_color: TOPIC_COLORS.BLUE,
+    });
+    const topicThreadId = createdTopic.message_thread_id;
+    const topicScopeKey = createScopeKeyFromParams({
+      chatId: ctx.chat.id,
+      threadId: topicThreadId,
+      context: SCOPE_CONTEXT.GROUP_TOPIC,
+    });
+
+    setCurrentProject(currentProject, topicScopeKey);
+    setCurrentSession(sessionInfo, topicScopeKey);
+    setCurrentAgent(await resolveProjectAgent(getStoredAgent(scopeKey), scopeKey), topicScopeKey);
+    setCurrentModel(getStoredModel(scopeKey), topicScopeKey);
+    registerTopicSessionBinding({
+      scopeKey: topicScopeKey,
+      chatId: ctx.chat.id,
+      threadId: topicThreadId,
+      sessionId: sessionInfo.id,
+      projectId: currentProject.id,
+      projectWorktree: currentProject.worktree,
+      topicName: topicTitle,
+      status: TOPIC_SESSION_STATUS.ACTIVE,
+    });
+    clearAllInteractionState("session_switched", scopeKey);
+    clearAllInteractionState("session_switched", topicScopeKey);
+
+    await attachToSession({
+      bot: deps.bot,
+      chatId: ctx.chat.id,
+      threadId: topicThreadId,
+      scopeKey: topicScopeKey,
+      session: sessionInfo,
+      ensureEventSubscription: deps.ensureEventSubscription,
+    });
+
+    const topicLink = buildTopicThreadLink(ctx.chat, topicThreadId);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+      topicLink
+        ? t("sessions.created_topic_link", { title: session.title, topic: topicTitle, url: topicLink })
+        : t("new.topic_created", { title: session.title }),
+      getThreadSendOptions(scope?.threadId ?? null),
+    );
+    return;
+  }
+
+  if (scopeKey) {
+    setCurrentSession(sessionInfo, scopeKey);
+  } else {
+    setCurrentSession(sessionInfo);
+  }
+  if (scope && isTopicScope(scope)) {
+    registerTopicSessionBinding({
+      scopeKey: scope.key,
+      chatId: scope.chatId,
+      threadId: scope.threadId!,
+      sessionId: sessionInfo.id,
+      projectId: currentProject.id,
+      projectWorktree: currentProject.worktree,
+      topicName: formatTopicTitle(sessionInfo.title),
+    });
+  }
+  clearAllInteractionState("session_switched", scopeKey);
 
   await ctx.answerCallbackQuery();
 
   let loadingMessageId: number | null = null;
   if (ctx.chat) {
     try {
-      const loadingMessage = await ctx.api.sendMessage(ctx.chat.id, t("sessions.loading_context"));
+      const loadingMessage = await ctx.api.sendMessage(ctx.chat.id, t("sessions.loading_context"), {
+        ...getThreadSendOptions(ctx.callbackQuery?.message?.message_thread_id ?? null),
+      });
       loadingMessageId = loadingMessage.message_id;
     } catch (err) {
       logger.error("[Sessions] Failed to send loading message:", err);
@@ -321,13 +442,17 @@ async function selectSessionById(
 
   if (ctx.chat) {
     const chatId = ctx.chat.id;
-    const currentAgent = await resolveProjectAgent();
+    const currentAgent = await resolveProjectAgent(undefined, scopeKey);
 
-    keyboardManager.updateAgent(currentAgent);
+    if (scopeKey) {
+      keyboardManager.updateAgent(currentAgent, scopeKey);
+    } else {
+      keyboardManager.updateAgent(currentAgent);
+    }
 
-    const contextInfo = keyboardManager.getContextInfo();
+    const contextInfo = keyboardManager.getContextInfo(scopeKey);
     if (contextInfo) {
-      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
+      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit, scopeKey);
     }
 
     if (loadingMessageId) {
@@ -338,10 +463,11 @@ async function selectSessionById(
       }
     }
 
-    const keyboard = keyboardManager.getKeyboard();
+    const keyboard = keyboardManager.getKeyboard(scopeKey);
     try {
       await ctx.api.sendMessage(chatId, t("sessions.selected", { title: session.title }), {
         reply_markup: keyboard,
+        ...getThreadSendOptions(ctx.callbackQuery?.message?.message_thread_id ?? null),
       });
     } catch (err) {
       logger.error("[Sessions] Failed to send selection message:", err);
@@ -445,10 +571,11 @@ export async function handleSessionSelect(ctx: Context, deps: SessionSelectDeps)
   }
 
   try {
-    const currentProject = getCurrentProject();
+    const scopeKey = getScopeKeyFromContext(ctx);
+    const currentProject = getCurrentProject(scopeKey);
 
     if (!currentProject) {
-      clearAllInteractionState("session_select_project_missing");
+      clearAllInteractionState("session_select_project_missing", scopeKey);
       await ctx.answerCallbackQuery();
       await ctx.reply(t("sessions.select_project_first"));
       return true;

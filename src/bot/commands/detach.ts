@@ -10,16 +10,19 @@ import { assistantRunState } from "../assistant-run-state.js";
 import { clearPromptResponseMode } from "../handlers/prompt.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
+import { getScopeFromContext } from "../scope.js";
 
 export async function detachCommand(ctx: CommandContext<Context>): Promise<void> {
   try {
-    const currentProject = getCurrentProject();
+    const scope = getScopeFromContext(ctx);
+    const scopeKey = scope?.key;
+    const currentProject = getCurrentProject(scopeKey);
     if (!currentProject) {
       await ctx.reply(t("detach.project_not_selected"));
       return;
     }
 
-    const currentSession = getCurrentSession();
+    const currentSession = getCurrentSession(scopeKey);
     if (!currentSession) {
       await ctx.reply(t("detach.no_active_session"));
       return;
@@ -29,26 +32,34 @@ export async function detachCommand(ctx: CommandContext<Context>): Promise<void>
     clearPromptResponseMode(currentSession.id);
     foregroundSessionState.markIdle(currentSession.id);
     assistantRunState.clearRun(currentSession.id, "detach_command");
-    clearAllInteractionState("detach_command");
-    clearSession();
+    if (scopeKey) {
+      clearAllInteractionState("detach_command", scopeKey);
+    } else {
+      clearAllInteractionState("detach_command");
+    }
+    clearSession(scopeKey);
 
-    if (pinnedMessageManager.isInitialized()) {
+    if (pinnedMessageManager.isInitialized(scopeKey)) {
       try {
-        await pinnedMessageManager.clear();
+        await pinnedMessageManager.clear(scopeKey);
       } catch (error) {
         logger.error("[Detach] Failed to clear pinned message:", error);
       }
     }
 
     if (ctx.chat) {
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
+      keyboardManager.initialize(ctx.api, ctx.chat.id, scopeKey);
     }
 
-    await pinnedMessageManager.refreshContextLimit();
-    const contextLimit = pinnedMessageManager.getContextLimit();
-    keyboardManager.updateContext(0, contextLimit);
+    await pinnedMessageManager.refreshContextLimit(scopeKey);
+    const contextLimit = pinnedMessageManager.getContextLimit(scopeKey);
+    if (scopeKey) {
+      keyboardManager.updateContext(0, contextLimit, scopeKey);
+    } else {
+      keyboardManager.updateContext(0, contextLimit);
+    }
 
-    const keyboard = keyboardManager.getKeyboard();
+    const keyboard = keyboardManager.getKeyboard(scopeKey);
 
     logger.info(
       `[Detach] Detached from session: id=${currentSession.id}, title="${currentSession.title}", project=${currentProject.worktree}`,

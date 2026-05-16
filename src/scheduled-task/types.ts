@@ -4,6 +4,21 @@ export type ScheduledTaskKind = "cron" | "once";
 
 export type ScheduledTaskStatus = "idle" | "running" | "success" | "error";
 
+export interface ScheduledTaskDeliveryTarget {
+  chatId: number;
+  threadId: number | null;
+}
+
+export interface ScheduledTaskTopicBinding {
+  chatId: number;
+  projectId: string;
+  projectWorktree: string;
+  threadId: number;
+  topicName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ScheduledTaskModel {
   providerID: string;
   modelID: string;
@@ -14,6 +29,7 @@ export interface ScheduledTaskBase {
   id: string;
   projectId: string;
   projectWorktree: string;
+  delivery?: ScheduledTaskDeliveryTarget;
   model: ScheduledTaskModel;
   scheduleText: string;
   scheduleSummary: string;
@@ -87,9 +103,22 @@ export function cloneScheduledTaskModel(model: ScheduledTaskModel): ScheduledTas
   return { ...model };
 }
 
+export function cloneScheduledTaskDeliveryTarget(
+  delivery: ScheduledTaskDeliveryTarget,
+): ScheduledTaskDeliveryTarget {
+  return { ...delivery };
+}
+
+export function cloneScheduledTaskTopicBinding(
+  binding: ScheduledTaskTopicBinding,
+): ScheduledTaskTopicBinding {
+  return { ...binding };
+}
+
 export function cloneScheduledTask(task: ScheduledTask): ScheduledTask {
   return {
     ...task,
+    ...(task.delivery ? { delivery: cloneScheduledTaskDeliveryTarget(task.delivery) } : {}),
     model: cloneScheduledTaskModel(task.model),
   };
 }
@@ -109,6 +138,7 @@ export interface QueuedScheduledTaskDelivery {
   prompt: string;
   runAt: string;
   status: "success" | "error";
+  delivery?: ScheduledTaskDeliveryTarget;
   notificationText: string;
   resultText?: string;
   footerText?: string;

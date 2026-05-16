@@ -168,6 +168,10 @@ export function resolveInteractionGuardDecision(ctx: Context): GuardDecision {
       );
     }
 
+    if (!state && inputType !== "callback") {
+      return createAllowDecision(inputType, state, command, true);
+    }
+
     return createBusyBlockDecision(inputType, state, "expected_text", command);
   }
 

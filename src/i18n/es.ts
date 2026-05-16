@@ -6,6 +6,7 @@ export const es: I18nDictionary = {
   "cmd.description.stop": "Detener la acción actual",
   "cmd.description.detach": "Desconectar de la sesión actual",
   "cmd.description.sessions": "Listar sesiones",
+  "cmd.description.last": "Mostrar última respuesta de la sesión",
   "cmd.description.tts": "Alternar respuestas de audio",
   "cmd.description.projects": "Listar proyectos",
   "cmd.description.worktree": "Cambiar worktrees de git",
@@ -71,13 +72,21 @@ export const es: I18nDictionary = {
   "bot.session_created": "✅ Sesión creada: {title}",
   "bot.session_busy":
     "⏳ El agente ya está ejecutando una tarea. Espera a que termine o usa /abort para interrumpir la ejecución actual.",
+  "bot.session_queued":
+    "📝 Tu mensaje se puso en cola para esta sesión.\n\nPosición en la cola: {position}\nQué sigue: se iniciará automáticamente cuando termine la ejecución actual.",
+  "bot.session_queue_started":
+    "▶️ Iniciando el siguiente mensaje en cola para esta sesión.\n\nMensaje en cola:\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ La sesión activa no coincide con el proyecto seleccionado, así que se reinició. Usa /sessions para elegir una o /new para crear una nueva.",
   "bot.prompt_send_error": "No se pudo enviar la solicitud a OpenCode.",
+  "bot.prompt_send_error_session_not_found":
+    "No se pudo enviar la solicitud porque la sesión de OpenCode ya no existe. Usa /sessions o /new para continuar.",
   "bot.session_error": "🔴 OpenCode devolvió un error: {message}",
   "bot.session_retry":
     "🔁 {message}\n\nEl proveedor devuelve el mismo error en intentos repetidos. Usa /abort para detenerlo.",
   "bot.external_user_input": "Entrada externa del usuario",
+  "topic.unbound":
+    "⚠️ Este tema no está vinculado a ninguna sesión. Ve al tema General y ejecuta /new.",
   "background.session_fallback": "sesión {id}",
   "background.assistant_response":
     "🔔 El asistente respondió en una sesión en segundo plano: {session}",
@@ -158,11 +167,19 @@ export const es: I18nDictionary = {
   "sessions.button.next_page": "Siguiente ➡️",
   "sessions.loading_context": "⏳ Cargando contexto y los últimos mensajes...",
   "sessions.selected": "✅ Sesión seleccionada: {title}",
+  "sessions.bound_topic_link":
+    "Session already has a topic: {title}\nTopic: {topic}\n{url}",
+  "sessions.created_topic_link": "Created topic for session: {title}\nTopic: {topic}\n{url}",
   "sessions.select_error": "🔴 No se pudo seleccionar la sesión.",
   "sessions.preview.empty": "No hay mensajes recientes.",
   "sessions.preview.title": "Mensajes recientes:",
   "sessions.preview.you": "Tú:",
   "sessions.preview.agent": "Agente:",
+
+  "last.title": "Último mensaje",
+  "last.session_not_selected": "💬 No hay una sesión seleccionada. Elige una con /sessions.",
+  "last.empty": "No hay mensajes recientes.",
+  "last.fetch_error": "🔴 No se pudo cargar el último mensaje de la sesión.",
 
   "attach.project_not_selected":
     "🏗 No hay un proyecto seleccionado.\n\nPrimero selecciona un proyecto con /projects.",
@@ -191,6 +208,13 @@ export const es: I18nDictionary = {
   "new.created": "✅ Sesión nueva creada: {title}",
   "new.create_error":
     "🔴 OpenCode Server no está disponible u ocurrió un error al crear la sesión.",
+  "new.topic_only_in_general": "Create new forum-topic sessions from the General topic.",
+  "new.topic_create_error": "🔴 Failed to create the session topic.",
+  "new.topic_create_no_rights":
+    "🔴 I do not have permission to create forum topics in this group.",
+  "new.topic_created": "✅ Session topic ready: {title}",
+  "new.general_created": "✅ New session topic created.",
+  "new.general_open_link": "Open it here: {url}",
 
   "stop.no_active_session":
     "🛑 El agente no se inició\n\nCrea una sesión con /new o selecciona una con /sessions.",
@@ -425,6 +449,11 @@ export const es: I18nDictionary = {
   "task.prompt_empty": "⚠️ El texto de la tarea no puede estar vacío.",
   "task.created":
     "✅ Tarea programada creada\n\nTarea: {description}\nProyecto: {project}\nModelo: {model}\nHorario: {schedule}\n{cronLine}Próxima ejecución: {nextRunAt}",
+  "task.created_topic_link": "Tema de salida de tareas programadas: {url}",
+  "task.output_topic_commands_only":
+    "Este tema está reservado para la salida de tareas programadas. Usa el chat principal para comandos del bot.",
+  "task.output_topic_blocked":
+    "Este tema está reservado para la salida de tareas programadas. Ve al tema de control de sesión para iniciar o continuar una sesión de código.",
   "task.created.cron": "Cron: {cron}",
   "task.button.retry_schedule": "🔁 Volver a introducir horario",
   "task.button.cancel": "❌ Cancelar",

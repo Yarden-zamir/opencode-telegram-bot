@@ -261,4 +261,29 @@ describe("pinned/manager", () => {
       expect(callback).toHaveBeenCalledWith(3500, 204800);
     });
   });
+
+  it("keeps pinned messages isolated per scope", async () => {
+    const topicApi = {
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 321 }),
+      editMessageText: vi.fn().mockResolvedValue(undefined),
+      pinChatMessage: vi.fn().mockResolvedValue(undefined),
+      unpinAllChatMessages: vi.fn().mockResolvedValue(undefined),
+    };
+
+    pinnedMessageManager.initialize(topicApi as never, -100123, "-100123:42", 42);
+    await pinnedMessageManager.onSessionChange("topic-session", "Topic Session", "-100123:42");
+
+    expect(topicApi.sendMessage).toHaveBeenCalledWith(
+      -100123,
+      expect.stringContaining("Topic Session"),
+      { message_thread_id: 42 },
+    );
+    expect(pinnedMessageManager.getState("-100123:42")).toMatchObject({
+      messageId: 321,
+      chatId: -100123,
+      threadId: 42,
+      sessionId: "topic-session",
+    });
+    expect(pinnedMessageManager.getState()).not.toMatchObject({ sessionId: "topic-session" });
+  });
 });

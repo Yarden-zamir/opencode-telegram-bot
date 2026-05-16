@@ -6,6 +6,7 @@ export const ru: I18nDictionary = {
   "cmd.description.stop": "Прервать текущее действие",
   "cmd.description.detach": "Отсоединиться от текущей сессии",
   "cmd.description.sessions": "Список сессий",
+  "cmd.description.last": "Показать последний ответ сессии",
   "cmd.description.tts": "Переключить аудиоответы",
   "cmd.description.projects": "Список проектов",
   "cmd.description.worktree": "Переключить git worktree",
@@ -67,13 +68,21 @@ export const ru: I18nDictionary = {
   "bot.session_created": "✅ Сессия создана: {title}",
   "bot.session_busy":
     "⏳ Агент уже выполняет задачу. Дождитесь завершения или используйте /abort, чтобы прервать текущий запуск.",
+  "bot.session_queued":
+    "📝 Ваше сообщение поставлено в очередь для этой сессии.\n\nПозиция в очереди: {position}\nЧто дальше: оно запустится автоматически после завершения текущего запуска.",
+  "bot.session_queue_started":
+    "▶️ Запускаю следующее сообщение из очереди для этой сессии.\n\nСообщение из очереди:\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ Активная сессия не соответствует выбранному проекту, поэтому была сброшена. Используйте /sessions для выбора или /new для создания новой сессии.",
   "bot.prompt_send_error": "Не удалось отправить запрос в OpenCode.",
+  "bot.prompt_send_error_session_not_found":
+    "Не удалось отправить запрос, потому что сессия OpenCode больше не существует. Используйте /sessions или /new, чтобы продолжить.",
   "bot.session_error": "🔴 OpenCode вернул ошибку: {message}",
   "bot.session_retry":
     "🔁 {message}\n\nПровайдер возвращает одну и ту же ошибку при повторных запросах. Используйте /abort для остановки.",
   "bot.external_user_input": "Внешний ввод пользователя",
+  "topic.unbound":
+    "⚠️ Этот топик не связан ни с одной сессией. Перейдите в топик General и выполните /new.",
   "background.session_fallback": "сессия {id}",
   "background.assistant_response": "🔔 В фоновой сессии пришёл ответ ассистента: {session}",
   "background.question_asked": "❓ В фоновой сессии нужен ответ: {session}",
@@ -151,11 +160,19 @@ export const ru: I18nDictionary = {
   "sessions.button.next_page": "Вперёд ➡️",
   "sessions.loading_context": "⏳ Загружаю контекст и последние сообщения...",
   "sessions.selected": "✅ Сессия выбрана: {title}",
+  "sessions.bound_topic_link":
+    "Session already has a topic: {title}\nTopic: {topic}\n{url}",
+  "sessions.created_topic_link": "Created topic for session: {title}\nTopic: {topic}\n{url}",
   "sessions.select_error": "🔴 Ошибка при выборе сессии.",
   "sessions.preview.empty": "Последних сообщений нет.",
   "sessions.preview.title": "Последние сообщения:",
   "sessions.preview.you": "Вы:",
   "sessions.preview.agent": "Агент:",
+
+  "last.title": "Последнее сообщение",
+  "last.session_not_selected": "💬 Сессия не выбрана. Выберите её через /sessions.",
+  "last.empty": "Последних сообщений нет.",
+  "last.fetch_error": "🔴 Не удалось загрузить последнее сообщение сессии.",
 
   "attach.project_not_selected":
     "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
@@ -182,6 +199,13 @@ export const ru: I18nDictionary = {
   "new.project_not_selected": "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
   "new.created": "✅ Создана новая сессия: {title}",
   "new.create_error": "🔴 OpenCode Server недоступен или произошла ошибка при создании сессии.",
+  "new.topic_only_in_general": "Create new forum-topic sessions from the General topic.",
+  "new.topic_create_error": "🔴 Failed to create the session topic.",
+  "new.topic_create_no_rights":
+    "🔴 I do not have permission to create forum topics in this group.",
+  "new.topic_created": "✅ Session topic ready: {title}",
+  "new.general_created": "✅ New session topic created.",
+  "new.general_open_link": "Open it here: {url}",
 
   "stop.no_active_session":
     "🛑 Агент не был запущен\n\nСначала создайте сессию командой /new или выберите существующую через /sessions.",
@@ -411,6 +435,11 @@ export const ru: I18nDictionary = {
   "task.prompt_empty": "⚠️ Текст задачи не может быть пустым.",
   "task.created":
     "✅ Задача по расписанию создана\n\nЗадача: {description}\nПроект: {project}\nМодель: {model}\nРасписание: {schedule}\n{cronLine}Следующий запуск: {nextRunAt}",
+  "task.created_topic_link": "Топик вывода задач по расписанию: {url}",
+  "task.output_topic_commands_only":
+    "Этот топик предназначен для вывода задач по расписанию. Используйте основной чат для команд бота.",
+  "task.output_topic_blocked":
+    "Этот топик предназначен для вывода задач по расписанию. Перейдите в топик управления сессиями, чтобы начать или продолжить сессию разработки.",
   "task.created.cron": "Cron: {cron}",
   "task.button.retry_schedule": "🔁 Ввести период заново",
   "task.button.cancel": "❌ Отмена",

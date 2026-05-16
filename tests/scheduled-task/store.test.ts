@@ -6,8 +6,12 @@ import { setRuntimeMode } from "../../src/runtime/mode.js";
 import { __resetSettingsForTests, loadSettings } from "../../src/settings/manager.js";
 import {
   addScheduledTask,
+  getScheduledTaskTopicByChatAndProject,
+  getScheduledTaskTopicByChatAndThread,
   listScheduledTasks,
+  listScheduledTaskTopics,
   removeScheduledTask,
+  upsertScheduledTaskTopic,
 } from "../../src/scheduled-task/store.js";
 import {
   cleanupScheduledTaskSessionIgnores,
@@ -15,7 +19,7 @@ import {
   registerScheduledTaskSessionIgnore,
   removeScheduledTaskSessionIgnore,
 } from "../../src/scheduled-task/session-ignore.js";
-import type { ScheduledTask } from "../../src/scheduled-task/types.js";
+import type { ScheduledTask, ScheduledTaskTopicBinding } from "../../src/scheduled-task/types.js";
 
 function createScheduledTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
   return {
@@ -41,6 +45,21 @@ function createScheduledTask(overrides: Partial<ScheduledTask> = {}): ScheduledT
     lastError: null,
     ...overrides,
   } as ScheduledTask;
+}
+
+function createTopicBinding(
+  overrides: Partial<ScheduledTaskTopicBinding> = {},
+): ScheduledTaskTopicBinding {
+  return {
+    chatId: -100123,
+    projectId: "project-1",
+    projectWorktree: "D:/Projects/Repo",
+    threadId: 42,
+    topicName: "Scheduled Tasks",
+    createdAt: "2026-03-15T10:00:00.000Z",
+    updatedAt: "2026-03-15T10:00:00.000Z",
+    ...overrides,
+  };
 }
 
 describe("scheduled-task/store", () => {
@@ -123,5 +142,27 @@ describe("scheduled-task/store", () => {
     expect(isScheduledTaskSessionIgnored("fresh-session", new Date("2026-03-16T12:00:00.000Z"))).toBe(
       false,
     );
+  });
+
+  it("persists and looks up scheduled task topic bindings", async () => {
+    const topic = createTopicBinding();
+
+    await upsertScheduledTaskTopic(topic);
+
+    expect(listScheduledTaskTopics()).toEqual([topic]);
+    expect(await getScheduledTaskTopicByChatAndProject(-100123, "project-1")).toEqual(topic);
+    expect(await getScheduledTaskTopicByChatAndThread(-100123, 42)).toEqual(topic);
+
+    const updatedTopic = createTopicBinding({ threadId: 99, updatedAt: "2026-03-15T11:00:00.000Z" });
+    await upsertScheduledTaskTopic(updatedTopic);
+
+    expect(listScheduledTaskTopics()).toEqual([updatedTopic]);
+    expect(await getScheduledTaskTopicByChatAndThread(-100123, 42)).toBeNull();
+
+    const settingsPath = path.join(tempHome, "settings.json");
+    const settingsFile = JSON.parse(await readFile(settingsPath, "utf-8")) as {
+      scheduledTaskTopics?: ScheduledTaskTopicBinding[];
+    };
+    expect(settingsFile.scheduledTaskTopics).toEqual([updatedTopic]);
   });
 });

@@ -12,13 +12,24 @@ import { abortCurrentOperation } from "./abort.js";
 import { t } from "../../i18n/index.js";
 import { assistantRunState } from "../assistant-run-state.js";
 import { detachAttachedSession } from "../../attach/service.js";
+import { getScopeFromContext, getThreadSendOptions } from "../scope.js";
 
 export async function startCommand(ctx: Context): Promise<void> {
+  const scope = getScopeFromContext(ctx);
+  const scopeKey = scope?.key;
   if (ctx.chat) {
-    if (!pinnedMessageManager.isInitialized()) {
-      pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
+    if (!pinnedMessageManager.isInitialized(scopeKey)) {
+      if (scopeKey || scope?.threadId) {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat.id, scopeKey, scope?.threadId ?? null);
+      } else {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
+      }
     }
-    keyboardManager.initialize(ctx.api, ctx.chat.id);
+    if (scopeKey) {
+      keyboardManager.initialize(ctx.api, ctx.chat.id, scopeKey);
+    } else {
+      keyboardManager.initialize(ctx.api, ctx.chat.id);
+    }
   }
 
   await abortCurrentOperation(ctx, { notifyUser: false });
@@ -26,29 +37,29 @@ export async function startCommand(ctx: Context): Promise<void> {
   foregroundSessionState.clearAll("start_command_reset");
   assistantRunState.clearAll("start_command_reset");
 
-  clearSession();
-  clearProject();
-  keyboardManager.clearContext();
-  await pinnedMessageManager.clear();
+  clearSession(scopeKey);
+  clearProject(scopeKey);
+  keyboardManager.clearContext(scopeKey);
+  await pinnedMessageManager.clear(scopeKey);
 
-  if (pinnedMessageManager.getContextLimit() === 0) {
-    await pinnedMessageManager.refreshContextLimit();
+  if (pinnedMessageManager.getContextLimit(scopeKey) === 0) {
+    await pinnedMessageManager.refreshContextLimit(scopeKey);
   }
 
   // Get current agent, model, and context
-  const currentAgent = getStoredAgent();
-  const currentModel = getStoredModel();
+  const currentAgent = getStoredAgent(scopeKey);
+  const currentModel = getStoredModel(scopeKey);
   const variantName = formatVariantForButton(currentModel.variant || "default");
   const contextInfo =
-    pinnedMessageManager.getContextInfo() ??
-    (pinnedMessageManager.getContextLimit() > 0
-      ? { tokensUsed: 0, tokensLimit: pinnedMessageManager.getContextLimit() }
+    pinnedMessageManager.getContextInfo(scopeKey) ??
+    (pinnedMessageManager.getContextLimit(scopeKey) > 0
+      ? { tokensUsed: 0, tokensLimit: pinnedMessageManager.getContextLimit(scopeKey) }
       : null);
 
-  keyboardManager.updateAgent(currentAgent);
-  keyboardManager.updateModel(currentModel);
+  keyboardManager.updateAgent(currentAgent, scopeKey);
+  keyboardManager.updateModel(currentModel, scopeKey);
   if (contextInfo) {
-    keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
+    keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit, scopeKey);
   }
 
   const keyboard = createMainKeyboard(
@@ -58,5 +69,8 @@ export async function startCommand(ctx: Context): Promise<void> {
     variantName,
   );
 
-  await ctx.reply(t("start.welcome"), { reply_markup: keyboard });
+  await ctx.reply(t("start.welcome"), {
+    reply_markup: keyboard,
+    ...getThreadSendOptions(scope?.threadId ?? null),
+  });
 }

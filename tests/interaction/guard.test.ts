@@ -313,7 +313,7 @@ describe("interaction guard", () => {
     expect(blockedDecision.busy).toBe(true);
   });
 
-  it("blocks start, plain text, and media while busy without interaction", () => {
+  it("blocks disallowed commands but lets prompt input queue while busy without interaction", () => {
     foregroundSessionState.markBusy("session-1", "D:\\Projects\\Repo");
 
     const startDecision = resolveInteractionGuardDecision(createContext({ text: "/start" }));
@@ -323,12 +323,12 @@ describe("interaction guard", () => {
 
     expect(startDecision.allow).toBe(false);
     expect(startDecision.reason).toBe("command_not_allowed");
-    expect(textDecision.allow).toBe(false);
-    expect(textDecision.reason).toBe("expected_text");
-    expect(voiceDecision.allow).toBe(false);
-    expect(voiceDecision.reason).toBe("expected_text");
-    expect(photoDecision.allow).toBe(false);
-    expect(photoDecision.reason).toBe("expected_text");
+    expect(textDecision.allow).toBe(true);
+    expect(textDecision.busy).toBe(true);
+    expect(voiceDecision.allow).toBe(true);
+    expect(voiceDecision.busy).toBe(true);
+    expect(photoDecision.allow).toBe(true);
+    expect(photoDecision.busy).toBe(true);
   });
 
   it("allows valid question answers while busy", () => {

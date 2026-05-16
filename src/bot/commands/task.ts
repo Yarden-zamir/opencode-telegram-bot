@@ -8,19 +8,28 @@ import { getStoredModel } from "../../model/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { taskCreationManager } from "../../scheduled-task/creation-manager.js";
 import { parseTaskSchedule } from "../../scheduled-task/schedule-parser.js";
-import { addScheduledTask, listScheduledTasks } from "../../scheduled-task/store.js";
+import {
+  addScheduledTask,
+  getScheduledTaskTopicByChatAndProject,
+  listScheduledTasks,
+  upsertScheduledTaskTopic,
+} from "../../scheduled-task/store.js";
 import { scheduledTaskRuntime } from "../../scheduled-task/runtime.js";
+import { SCHEDULED_TASK_OUTPUT_TOPIC_NAME } from "../../scheduled-task/topic-output.js";
 import {
   createScheduledTaskModel,
   type ParsedTaskSchedule,
   type ScheduledTask,
+  type ScheduledTaskDeliveryTarget,
   type TaskCreationState,
 } from "../../scheduled-task/types.js";
 import { logger } from "../../utils/logger.js";
+import { getScopeKeyFromContext } from "../scope.js";
 
 const TASK_RETRY_SCHEDULE_CALLBACK = "task:retry-schedule";
 const TASK_CANCEL_CALLBACK = "task:cancel";
 const TASK_PROMPT_PREVIEW_LENGTH = 100;
+const TELEGRAM_TOPIC_ICON_BLUE = 0x6fb9f0;
 
 interface TaskInteractionMetadata {
   flow: "task";
@@ -50,16 +59,16 @@ function getCallbackMessageId(ctx: Context): number | null {
   return typeof messageId === "number" ? messageId : null;
 }
 
-function clearTaskInteraction(reason: string): void {
-  const state = interactionManager.getSnapshot();
+function clearTaskInteraction(reason: string, scopeKey?: string): void {
+  const state = interactionManager.getSnapshot(scopeKey);
   if (state?.kind === "task") {
-    interactionManager.clear(reason);
+    interactionManager.clear(reason, scopeKey);
   }
 }
 
-function clearTaskFlow(reason: string): void {
-  taskCreationManager.clear();
-  clearTaskInteraction(reason);
+function clearTaskFlow(reason: string, scopeKey?: string): void {
+  taskCreationManager.clear(scopeKey);
+  clearTaskInteraction(reason, scopeKey);
 }
 
 function isTaskLimitReached(): boolean {
@@ -121,6 +130,78 @@ function formatTaskCreatedMessage(task: ScheduledTask): string {
     cronLine,
     nextRunAt: task.nextRunAt ? formatScheduledDate(task.nextRunAt, task.timezone) : "-",
   });
+}
+
+function isForumGroupContext(ctx: Context): boolean {
+  return ctx.chat?.type === "supergroup" && Reflect.get(ctx.chat, "is_forum") === true;
+}
+
+function buildTopicThreadLink(chat: NonNullable<Context["chat"]>, threadId: number): string | null {
+  const username = Reflect.get(chat, "username");
+  if (typeof username === "string" && username.trim()) {
+    return `https://t.me/${username}/${threadId}`;
+  }
+
+  const chatId = chat.id;
+  if (chatId >= 0) {
+    return null;
+  }
+
+  const normalizedChatId = String(Math.abs(chatId)).replace(/^100/, "");
+  return `https://t.me/c/${normalizedChatId}/${threadId}`;
+}
+
+async function resolveScheduledTaskDeliveryTarget(
+  ctx: Context,
+  project: { id: string; worktree: string },
+): Promise<{ delivery: ScheduledTaskDeliveryTarget; createdTopicLink: string | null }> {
+  if (!ctx.chat) {
+    throw new Error("Missing chat context for scheduled task delivery");
+  }
+
+  if (!isForumGroupContext(ctx)) {
+    return {
+      delivery: {
+        chatId: ctx.chat.id,
+        threadId: null,
+      },
+      createdTopicLink: null,
+    };
+  }
+
+  const existingTopic = await getScheduledTaskTopicByChatAndProject(ctx.chat.id, project.id);
+  if (existingTopic) {
+    return {
+      delivery: {
+        chatId: existingTopic.chatId,
+        threadId: existingTopic.threadId,
+      },
+      createdTopicLink: null,
+    };
+  }
+
+  const createdTopic = await ctx.api.createForumTopic(ctx.chat.id, SCHEDULED_TASK_OUTPUT_TOPIC_NAME, {
+    icon_color: TELEGRAM_TOPIC_ICON_BLUE,
+  });
+  const timestamp = new Date().toISOString();
+
+  await upsertScheduledTaskTopic({
+    chatId: ctx.chat.id,
+    projectId: project.id,
+    projectWorktree: project.worktree,
+    threadId: createdTopic.message_thread_id,
+    topicName: SCHEDULED_TASK_OUTPUT_TOPIC_NAME,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  return {
+    delivery: {
+      chatId: ctx.chat.id,
+      threadId: createdTopic.message_thread_id,
+    },
+    createdTopicLink: buildTopicThreadLink(ctx.chat, createdTopic.message_thread_id),
+  };
 }
 
 function validateCronMinutesFrequency(cron: string): void {
@@ -260,6 +341,7 @@ async function deleteMessageIfPresent(
 function buildScheduledTask(
   projectId: string,
   projectWorktree: string,
+  delivery: ScheduledTaskDeliveryTarget,
   model: ScheduledTask["model"],
   scheduleText: string,
   parsedSchedule: ParsedTaskSchedule,
@@ -269,6 +351,7 @@ function buildScheduledTask(
     id: randomUUID(),
     projectId,
     projectWorktree,
+    delivery,
     model,
     scheduleText,
     scheduleSummary: parsedSchedule.summary,
@@ -298,7 +381,8 @@ function buildScheduledTask(
 }
 
 export async function taskCommand(ctx: CommandContext<Context>): Promise<void> {
-  const currentProject = getCurrentProject();
+  const scopeKey = getScopeKeyFromContext(ctx);
+  const currentProject = getCurrentProject(scopeKey);
   if (!currentProject) {
     await ctx.reply(t("bot.project_not_selected"));
     return;
@@ -309,9 +393,9 @@ export async function taskCommand(ctx: CommandContext<Context>): Promise<void> {
     return;
   }
 
-  const currentModel = createScheduledTaskModel(getStoredModel());
+  const currentModel = createScheduledTaskModel(getStoredModel(scopeKey));
 
-  taskCreationManager.start(currentProject.id, currentProject.worktree, currentModel);
+  taskCreationManager.start(currentProject.id, currentProject.worktree, currentModel, scopeKey);
   interactionManager.start({
     kind: "task",
     expectedInput: "text",
@@ -320,12 +404,12 @@ export async function taskCommand(ctx: CommandContext<Context>): Promise<void> {
       currentProject.id,
       currentProject.worktree,
     ),
-  });
+  }, scopeKey);
 
   const message = await ctx.reply(t("task.prompt.schedule"), {
     reply_markup: buildCancelKeyboard(),
   });
-  taskCreationManager.setScheduleRequestMessageId(message.message_id);
+  taskCreationManager.setScheduleRequestMessageId(message.message_id, scopeKey);
 }
 
 export async function handleTaskCallback(ctx: Context): Promise<boolean> {
@@ -334,8 +418,9 @@ export async function handleTaskCallback(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  const flowState = taskCreationManager.getState();
-  const interactionState = interactionManager.getSnapshot();
+  const scopeKey = getScopeKeyFromContext(ctx);
+  const flowState = taskCreationManager.getState(scopeKey);
+  const interactionState = interactionManager.getSnapshot(scopeKey);
   const callbackMessageId = getCallbackMessageId(ctx);
 
   if (
@@ -345,7 +430,7 @@ export async function handleTaskCallback(ctx: Context): Promise<boolean> {
     !isTaskCallbackActive(flowState, callbackMessageId)
   ) {
     if (!flowState && isTaskInteraction(interactionState)) {
-      clearTaskInteraction("task_retry_inactive_state");
+      clearTaskInteraction("task_retry_inactive_state", scopeKey);
     }
 
     await ctx.answerCallbackQuery({ text: t("task.inactive_callback"), show_alert: true });
@@ -357,20 +442,20 @@ export async function handleTaskCallback(ctx: Context): Promise<boolean> {
     await deleteMessageIfPresent(ctx, flowState.scheduleRequestMessageId);
     await deleteMessageIfPresent(ctx, flowState.previewMessageId);
     await deleteMessageIfPresent(ctx, flowState.promptRequestMessageId);
-    clearTaskFlow("task_cancelled");
+    clearTaskFlow("task_cancelled", scopeKey);
     await ctx.reply(t("task.cancelled"));
     return true;
   }
 
   if (
-    !taskCreationManager.isWaitingForPrompt() ||
+    !taskCreationManager.isWaitingForPrompt(scopeKey) ||
     callbackMessageId !== flowState.previewMessageId
   ) {
     await ctx.answerCallbackQuery({ text: t("task.inactive_callback"), show_alert: true });
     return true;
   }
 
-  taskCreationManager.resetSchedule();
+  taskCreationManager.resetSchedule(scopeKey);
   interactionManager.transition({
     kind: "task",
     expectedInput: "text",
@@ -379,7 +464,7 @@ export async function handleTaskCallback(ctx: Context): Promise<boolean> {
       flowState.projectId,
       flowState.projectWorktree,
     ),
-  });
+  }, scopeKey);
 
   await ctx.answerCallbackQuery({ text: t("task.retry_schedule_callback") });
   await deleteMessageIfPresent(ctx, flowState.promptRequestMessageId);
@@ -387,48 +472,49 @@ export async function handleTaskCallback(ctx: Context): Promise<boolean> {
   const message = await ctx.reply(t("task.prompt.schedule"), {
     reply_markup: buildCancelKeyboard(),
   });
-  taskCreationManager.setScheduleRequestMessageId(message.message_id);
+  taskCreationManager.setScheduleRequestMessageId(message.message_id, scopeKey);
 
   return true;
 }
 
 export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
+  const scopeKey = getScopeKeyFromContext(ctx);
   const text = ctx.message?.text;
   if (!text || text.startsWith("/")) {
     return false;
   }
 
-  if (!taskCreationManager.isActive()) {
+  if (!taskCreationManager.isActive(scopeKey)) {
     return false;
   }
 
-  const interactionState = interactionManager.getSnapshot();
+  const interactionState = interactionManager.getSnapshot(scopeKey);
   if (!isTaskInteraction(interactionState)) {
-    taskCreationManager.clear();
+    taskCreationManager.clear(scopeKey);
     await ctx.reply(t("task.inactive"));
     return true;
   }
 
-  const flowState = taskCreationManager.getState();
+  const flowState = taskCreationManager.getState(scopeKey);
   if (!flowState) {
-    clearTaskFlow("task_state_missing");
+    clearTaskFlow("task_state_missing", scopeKey);
     await ctx.reply(t("task.inactive"));
     return true;
   }
 
-  if (taskCreationManager.isParsingSchedule()) {
+  if (taskCreationManager.isParsingSchedule(scopeKey)) {
     await ctx.reply(t("task.parse.in_progress"));
     return true;
   }
 
-  if (taskCreationManager.isWaitingForSchedule()) {
+  if (taskCreationManager.isWaitingForSchedule(scopeKey)) {
     const scheduleText = text.trim();
     if (!scheduleText) {
       await ctx.reply(t("task.schedule_empty"));
       return true;
     }
 
-    taskCreationManager.markScheduleParsing();
+    taskCreationManager.markScheduleParsing(scopeKey);
     interactionManager.transition({
       kind: "task",
       expectedInput: "text",
@@ -437,7 +523,7 @@ export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
         flowState.projectId,
         flowState.projectWorktree,
       ),
-    });
+    }, scopeKey);
 
     const parsingMessage = await ctx.reply(t("task.parse.in_progress"));
 
@@ -455,6 +541,7 @@ export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
         scheduleText,
         parsedSchedule,
         previewMessage.message_id,
+        scopeKey,
       );
       interactionManager.transition({
         kind: "task",
@@ -465,13 +552,13 @@ export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
           flowState.projectWorktree,
           previewMessage.message_id,
         ),
-      });
-      taskCreationManager.setPromptRequestMessageId(previewMessage.message_id);
+      }, scopeKey);
+      taskCreationManager.setPromptRequestMessageId(previewMessage.message_id, scopeKey);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : t("common.unknown_error");
       logger.warn(`[TaskCommand] Failed to parse task schedule: ${errorMessage}`);
       await deleteMessageIfPresent(ctx, flowState.scheduleRequestMessageId);
-      taskCreationManager.resetSchedule();
+      taskCreationManager.resetSchedule(scopeKey);
       interactionManager.transition({
         kind: "task",
         expectedInput: "text",
@@ -480,18 +567,18 @@ export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
           flowState.projectId,
           flowState.projectWorktree,
         ),
-      });
+      }, scopeKey);
       await deleteMessageIfPresent(ctx, parsingMessage.message_id);
       const errorReply = await ctx.reply(t("task.parse_error", { message: errorMessage }), {
         reply_markup: buildCancelKeyboard(),
       });
-      taskCreationManager.setScheduleRequestMessageId(errorReply.message_id);
+      taskCreationManager.setScheduleRequestMessageId(errorReply.message_id, scopeKey);
     }
 
     return true;
   }
 
-  if (!taskCreationManager.isWaitingForPrompt()) {
+  if (!taskCreationManager.isWaitingForPrompt(scopeKey)) {
     return false;
   }
 
@@ -502,7 +589,7 @@ export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
   }
 
   if (!flowState.parsedSchedule || !flowState.scheduleText) {
-    clearTaskFlow("task_missing_schedule_before_save");
+    clearTaskFlow("task_missing_schedule_before_save", scopeKey);
     await ctx.reply(t("task.inactive"));
     return true;
   }
@@ -511,14 +598,19 @@ export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
     if (isTaskLimitReached()) {
       await deleteMessageIfPresent(ctx, flowState.previewMessageId);
       await deleteMessageIfPresent(ctx, flowState.promptRequestMessageId);
-      clearTaskFlow("task_limit_reached_before_save");
+      clearTaskFlow("task_limit_reached_before_save", scopeKey);
       await ctx.reply(t("task.limit_reached", { limit: String(config.bot.taskLimit) }));
       return true;
     }
 
+    const { delivery, createdTopicLink } = await resolveScheduledTaskDeliveryTarget(ctx, {
+      id: flowState.projectId,
+      worktree: flowState.projectWorktree,
+    });
     const task = buildScheduledTask(
       flowState.projectId,
       flowState.projectWorktree,
+      delivery,
       flowState.model,
       flowState.scheduleText,
       flowState.parsedSchedule,
@@ -529,8 +621,9 @@ export async function handleTaskTextInput(ctx: Context): Promise<boolean> {
     scheduledTaskRuntime.registerTask(task);
     await deleteMessageIfPresent(ctx, flowState.previewMessageId);
     await deleteMessageIfPresent(ctx, flowState.promptRequestMessageId);
-    clearTaskFlow("task_completed");
-    await ctx.reply(formatTaskCreatedMessage(task));
+    clearTaskFlow("task_completed", scopeKey);
+    const topicLinkText = createdTopicLink ? `\n\n${t("task.created_topic_link", { url: createdTopicLink })}` : "";
+    await ctx.reply(`${formatTaskCreatedMessage(task)}${topicLinkText}`);
   } catch (error) {
     logger.error("[TaskCommand] Failed to save scheduled task", error);
     await ctx.reply(t("error.generic"));

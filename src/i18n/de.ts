@@ -6,6 +6,7 @@ export const de: I18nDictionary = {
   "cmd.description.stop": "Aktuelle Aktion stoppen",
   "cmd.description.detach": "Von aktueller Sitzung trennen",
   "cmd.description.sessions": "Sitzungen auflisten",
+  "cmd.description.last": "Letzte Sitzungsantwort anzeigen",
   "cmd.description.tts": "Audioantworten umschalten",
   "cmd.description.projects": "Projekte auflisten",
   "cmd.description.worktree": "Git-Worktrees wechseln",
@@ -71,13 +72,21 @@ export const de: I18nDictionary = {
   "bot.session_created": "✅ Sitzung erstellt: {title}",
   "bot.session_busy":
     "⏳ Agent führt bereits eine Aufgabe aus. Warte auf Abschluss oder nutze /abort, um den aktuellen Lauf zu unterbrechen.",
+  "bot.session_queued":
+    "📝 Deine Nachricht wurde für diese Sitzung eingereiht.\n\nWarteschlangenposition: {position}\nAls Nächstes: Sie startet automatisch, sobald der aktuelle Lauf fertig ist.",
+  "bot.session_queue_started":
+    "▶️ Starte die nächste eingereihte Nachricht für diese Sitzung.\n\nEingereihte Nachricht:\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ Die aktive Sitzung passt nicht zum ausgewählten Projekt und wurde daher zurückgesetzt. Nutze /sessions zur Auswahl oder /new, um eine neue Sitzung zu erstellen.",
   "bot.prompt_send_error": "Anfrage konnte nicht an OpenCode gesendet werden.",
+  "bot.prompt_send_error_session_not_found":
+    "Anfrage konnte nicht gesendet werden, weil die OpenCode-Sitzung nicht mehr existiert. Nutze /sessions oder /new, um fortzufahren.",
   "bot.session_error": "🔴 OpenCode meldete einen Fehler: {message}",
   "bot.session_retry":
     "🔁 {message}\n\nDer Provider liefert bei wiederholten Versuchen immer wieder denselben Fehler. Mit /abort abbrechen.",
   "bot.external_user_input": "Externe Benutzereingabe",
+  "topic.unbound":
+    "⚠️ Dieses Thema ist mit keiner Sitzung verknüpft. Gehe zum General-Thema und führe /new aus.",
   "background.session_fallback": "Sitzung {id}",
   "background.assistant_response":
     "🔔 Assistent hat in einer Hintergrundsitzung geantwortet: {session}",
@@ -159,11 +168,19 @@ export const de: I18nDictionary = {
   "sessions.button.next_page": "Weiter ➡️",
   "sessions.loading_context": "⏳ Lade Kontext und letzte Nachrichten...",
   "sessions.selected": "✅ Sitzung ausgewählt: {title}",
+  "sessions.bound_topic_link":
+    "Session already has a topic: {title}\nTopic: {topic}\n{url}",
+  "sessions.created_topic_link": "Created topic for session: {title}\nTopic: {topic}\n{url}",
   "sessions.select_error": "🔴 Sitzung konnte nicht ausgewählt werden.",
   "sessions.preview.empty": "Keine neuen Nachrichten.",
   "sessions.preview.title": "Letzte Nachrichten:",
   "sessions.preview.you": "Du:",
   "sessions.preview.agent": "Agent:",
+
+  "last.title": "Letzte Nachricht",
+  "last.session_not_selected": "💬 Keine Sitzung ausgewählt. Wähle eine mit /sessions.",
+  "last.empty": "Keine neuen Nachrichten.",
+  "last.fetch_error": "🔴 Letzte Sitzungsnachricht konnte nicht geladen werden.",
 
   "attach.project_not_selected":
     "🏗 Projekt ist nicht ausgewählt.\n\nWähle zuerst ein Projekt mit /projects.",
@@ -193,6 +210,13 @@ export const de: I18nDictionary = {
   "new.created": "✅ Neue Sitzung erstellt: {title}",
   "new.create_error":
     "🔴 OpenCode-Server ist nicht verfügbar oder beim Erstellen der Sitzung ist ein Fehler aufgetreten.",
+  "new.topic_only_in_general": "Create new forum-topic sessions from the General topic.",
+  "new.topic_create_error": "🔴 Failed to create the session topic.",
+  "new.topic_create_no_rights":
+    "🔴 I do not have permission to create forum topics in this group.",
+  "new.topic_created": "✅ Session topic ready: {title}",
+  "new.general_created": "✅ New session topic created.",
+  "new.general_open_link": "Open it here: {url}",
 
   "stop.no_active_session":
     "🛑 Agent wurde nicht gestartet\n\nErstelle eine Sitzung mit /new oder wähle eine über /sessions aus.",
@@ -426,6 +450,11 @@ export const de: I18nDictionary = {
   "task.prompt_empty": "⚠️ Der Aufgabentext darf nicht leer sein.",
   "task.created":
     "✅ Geplante Aufgabe erstellt\n\nAufgabe: {description}\nProjekt: {project}\nModell: {model}\nZeitplan: {schedule}\n{cronLine}Nächster Lauf: {nextRunAt}",
+  "task.created_topic_link": "Ausgabethema für geplante Aufgaben: {url}",
+  "task.output_topic_commands_only":
+    "Dieses Thema ist für Ausgaben geplanter Aufgaben reserviert. Nutze den Hauptchat für Bot-Befehle.",
+  "task.output_topic_blocked":
+    "Dieses Thema ist für Ausgaben geplanter Aufgaben reserviert. Gehe zum Session-Control-Thema, um eine Coding-Sitzung zu starten oder fortzusetzen.",
   "task.created.cron": "Cron: {cron}",
   "task.button.retry_schedule": "🔁 Zeitplan neu eingeben",
   "task.button.cancel": "❌ Abbrechen",

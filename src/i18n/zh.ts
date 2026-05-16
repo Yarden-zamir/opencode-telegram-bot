@@ -6,6 +6,7 @@ export const zh: I18nDictionary = {
   "cmd.description.stop": "停止当前操作",
   "cmd.description.detach": "从当前会话分离",
   "cmd.description.sessions": "列出会话",
+  "cmd.description.last": "显示最新会话回复",
   "cmd.description.tts": "切换语音回复",
   "cmd.description.projects": "列出项目",
   "cmd.description.worktree": "切换 git worktree",
@@ -60,12 +61,18 @@ export const zh: I18nDictionary = {
   "bot.create_session_error": "🔴 创建会话失败。请重试 /new，或使用 /status 检查服务器状态。",
   "bot.session_created": "✅ 会话已创建：{title}",
   "bot.session_busy": "⏳ 代理正在执行任务。请等待完成，或使用 /abort 中断当前运行。",
+  "bot.session_queued":
+    "📝 你的消息已加入此会话的队列。\n\n队列位置：{position}\n接下来：当前运行完成后会自动开始。",
+  "bot.session_queue_started": "▶️ 正在开始此会话的下一条队列消息。\n\n队列消息：\n{preview}",
   "bot.session_reset_project_mismatch":
     "⚠️ 活动会话与所选项目不匹配，因此已重置。使用 /sessions 选择一个会话，或 /new 创建新会话。",
   "bot.prompt_send_error": "向 OpenCode 发送请求失败。",
+  "bot.prompt_send_error_session_not_found":
+    "发送请求失败，因为 OpenCode 会话已不存在。请使用 /sessions 或 /new 继续。",
   "bot.session_error": "🔴 OpenCode 返回错误：{message}",
   "bot.session_retry": "🔁 {message}\n\n提供方在重复重试时持续返回同一错误。使用 /abort 可停止。",
   "bot.external_user_input": "外部用户输入",
+  "topic.unbound": "⚠️ 此话题尚未绑定任何会话。请前往 General 话题并执行 /new。",
   "background.session_fallback": "会话 {id}",
   "background.assistant_response": "🔔 助手已在后台会话中回复：{session}",
   "background.question_asked": "❓ 后台会话需要回答：{session}",
@@ -137,11 +144,19 @@ export const zh: I18nDictionary = {
   "sessions.button.next_page": "下一页 ➡️",
   "sessions.loading_context": "⏳ 正在加载上下文和最新消息...",
   "sessions.selected": "✅ 已选择会话：{title}",
+  "sessions.bound_topic_link":
+    "Session already has a topic: {title}\nTopic: {topic}\n{url}",
+  "sessions.created_topic_link": "Created topic for session: {title}\nTopic: {topic}\n{url}",
   "sessions.select_error": "🔴 选择会话失败。",
   "sessions.preview.empty": "没有最近消息。",
   "sessions.preview.title": "最近消息：",
   "sessions.preview.you": "你：",
   "sessions.preview.agent": "代理：",
+
+  "last.title": "最新消息",
+  "last.session_not_selected": "💬 未选择会话。请使用 /sessions 选择一个会话。",
+  "last.empty": "没有最近消息。",
+  "last.fetch_error": "🔴 无法加载最新会话消息。",
 
   "attach.project_not_selected": "🏗 未选择项目。\n\n请先使用 /projects 选择一个项目。",
   "attach.session_not_selected": "💬 未选择会话。\n\n请先使用 /sessions 选择一个会话。",
@@ -164,6 +179,13 @@ export const zh: I18nDictionary = {
   "new.project_not_selected": "🏗 未选择项目。\n\n请先使用 /projects 选择一个项目。",
   "new.created": "✅ 新会话已创建：{title}",
   "new.create_error": "🔴 OpenCode 服务器不可用，或创建会话时发生错误。",
+  "new.topic_only_in_general": "Create new forum-topic sessions from the General topic.",
+  "new.topic_create_error": "🔴 Failed to create the session topic.",
+  "new.topic_create_no_rights":
+    "🔴 I do not have permission to create forum topics in this group.",
+  "new.topic_created": "✅ Session topic ready: {title}",
+  "new.general_created": "✅ New session topic created.",
+  "new.general_open_link": "Open it here: {url}",
 
   "stop.no_active_session": "🛑 代理尚未启动\n\n使用 /new 创建会话，或通过 /sessions 选择一个。",
   "stop.in_progress": "🛑 已停止事件流，正在发送中止信号...\n\n等待代理停止。",
@@ -371,6 +393,10 @@ export const zh: I18nDictionary = {
   "task.prompt_empty": "⚠️ 任务文本不能为空。",
   "task.created":
     "✅ 定时任务已创建\n\n任务：{description}\n项目：{project}\n模型：{model}\n时间安排：{schedule}\n{cronLine}下次运行：{nextRunAt}",
+  "task.created_topic_link": "定时任务输出话题：{url}",
+  "task.output_topic_commands_only": "此话题仅用于定时任务输出。请在主聊天中使用机器人命令。",
+  "task.output_topic_blocked":
+    "此话题仅用于定时任务输出。请前往会话控制话题来开始或继续编码会话。",
   "task.created.cron": "Cron: {cron}",
   "task.button.retry_schedule": "🔁 重新输入时间安排",
   "task.button.cancel": "❌ 取消",

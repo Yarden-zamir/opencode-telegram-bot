@@ -6,6 +6,13 @@ import { interactionManager } from "../../interaction/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
+import {
+  getOptionalThreadSendOptions,
+  getScopeFromContext,
+  getScopeKeyFromContext,
+  getThreadSendOptions,
+} from "../scope.js";
+import { syncTopicTitleForSession } from "../../topic/title-sync.js";
 
 function getCallbackMessageId(ctx: Context): number | null {
   const message = ctx.callbackQuery?.message;
@@ -17,16 +24,18 @@ function getCallbackMessageId(ctx: Context): number | null {
   return typeof messageId === "number" ? messageId : null;
 }
 
-function clearRenameInteraction(reason: string): void {
-  const state = interactionManager.getSnapshot();
+function clearRenameInteraction(reason: string, scopeKey?: string): void {
+  const state = interactionManager.getSnapshot(scopeKey);
   if (state?.kind === "rename") {
-    interactionManager.clear(reason);
+    interactionManager.clear(reason, scopeKey);
   }
 }
 
 export async function renameCommand(ctx: CommandContext<Context>): Promise<void> {
   try {
-    const currentSession = getCurrentSession();
+    const scope = getScopeFromContext(ctx);
+    const scopeKey = scope?.key;
+    const currentSession = getCurrentSession(scopeKey);
 
     if (!currentSession) {
       await ctx.reply(t("rename.no_session"));
@@ -37,10 +46,11 @@ export async function renameCommand(ctx: CommandContext<Context>): Promise<void>
 
     const message = await ctx.reply(t("rename.prompt", { title: currentSession.title }), {
       reply_markup: keyboard,
+      ...getThreadSendOptions(scope?.threadId ?? null),
     });
 
-    renameManager.startWaiting(currentSession.id, currentSession.directory, currentSession.title);
-    renameManager.setMessageId(message.message_id);
+    renameManager.startWaiting(currentSession.id, currentSession.directory, currentSession.title, scopeKey);
+    renameManager.setMessageId(message.message_id, scopeKey);
     interactionManager.start({
       kind: "rename",
       expectedInput: "text",
@@ -48,7 +58,7 @@ export async function renameCommand(ctx: CommandContext<Context>): Promise<void>
         sessionId: currentSession.id,
         messageId: message.message_id,
       },
-    });
+    }, scopeKey);
 
     logger.info(`[RenameCommand] Waiting for new title for session: ${currentSession.id}`);
   } catch (error) {
@@ -64,28 +74,29 @@ export async function handleRenameCancel(ctx: Context): Promise<boolean> {
   }
 
   logger.debug("[RenameHandler] Cancel callback received");
+  const scopeKey = getScopeKeyFromContext(ctx);
 
-  if (!renameManager.isWaitingForName()) {
-    clearRenameInteraction("rename_cancel_inactive");
+  if (!renameManager.isWaitingForName(scopeKey)) {
+    clearRenameInteraction("rename_cancel_inactive", scopeKey);
     await ctx.answerCallbackQuery({ text: t("rename.inactive_callback"), show_alert: true });
     return true;
   }
 
-  const interactionState = interactionManager.getSnapshot();
+  const interactionState = interactionManager.getSnapshot(scopeKey);
   if (interactionState?.kind !== "rename") {
-    renameManager.clear();
+    renameManager.clear(scopeKey);
     await ctx.answerCallbackQuery({ text: t("rename.inactive_callback"), show_alert: true });
     return true;
   }
 
   const callbackMessageId = getCallbackMessageId(ctx);
-  if (!renameManager.isActiveMessage(callbackMessageId)) {
+  if (!renameManager.isActiveMessage(callbackMessageId, scopeKey)) {
     await ctx.answerCallbackQuery({ text: t("rename.inactive_callback"), show_alert: true });
     return true;
   }
 
-  renameManager.clear();
-  clearRenameInteraction("rename_cancelled");
+  renameManager.clear(scopeKey);
+  clearRenameInteraction("rename_cancelled", scopeKey);
 
   await ctx.answerCallbackQuery();
   await ctx.editMessageText(t("rename.cancelled")).catch(() => {});
@@ -94,7 +105,9 @@ export async function handleRenameCancel(ctx: Context): Promise<boolean> {
 }
 
 export async function handleRenameTextAnswer(ctx: Context): Promise<boolean> {
-  if (!renameManager.isWaitingForName()) {
+  const scope = getScopeFromContext(ctx);
+  const scopeKey = scope?.key;
+  if (!renameManager.isWaitingForName(scopeKey)) {
     return false;
   }
 
@@ -107,17 +120,17 @@ export async function handleRenameTextAnswer(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  const interactionState = interactionManager.getSnapshot();
+  const interactionState = interactionManager.getSnapshot(scopeKey);
   if (interactionState?.kind !== "rename") {
-    renameManager.clear();
+    renameManager.clear(scopeKey);
     await ctx.reply(t("rename.inactive"));
     return true;
   }
 
-  const sessionInfo = renameManager.getSessionInfo();
+  const sessionInfo = renameManager.getSessionInfo(scopeKey);
   if (!sessionInfo) {
-    renameManager.clear();
-    clearRenameInteraction("rename_missing_session_info");
+    renameManager.clear(scopeKey);
+    clearRenameInteraction("rename_missing_session_info", scopeKey);
     return false;
   }
 
@@ -140,22 +153,35 @@ export async function handleRenameTextAnswer(ctx: Context): Promise<boolean> {
       throw error || new Error("Failed to update session");
     }
 
-    setCurrentSession({
+    const updatedSessionInfo = {
       id: sessionInfo.sessionId,
       title: newTitle,
       directory: sessionInfo.directory,
-    });
-
-    if (pinnedMessageManager.isInitialized()) {
-      await pinnedMessageManager.onSessionChange(sessionInfo.sessionId, newTitle);
+    };
+    if (scopeKey) {
+      setCurrentSession(updatedSessionInfo, scopeKey);
+    } else {
+      setCurrentSession(updatedSessionInfo);
     }
 
-    const messageId = renameManager.getMessageId();
+    if (pinnedMessageManager.isInitialized(scopeKey)) {
+      await pinnedMessageManager.onSessionChange(sessionInfo.sessionId, newTitle, scopeKey);
+    }
+    await syncTopicTitleForSession(ctx.api, sessionInfo.sessionId, newTitle).catch((error) => {
+      logger.debug("[RenameHandler] Failed to sync topic title after rename", error);
+    });
+
+    const messageId = renameManager.getMessageId(scopeKey);
     if (messageId && ctx.chat) {
       await ctx.api.deleteMessage(ctx.chat.id, messageId).catch(() => {});
     }
 
-    await ctx.reply(t("rename.success", { title: newTitle }));
+    const threadOptions = getOptionalThreadSendOptions(scope?.threadId ?? null);
+    if (threadOptions) {
+      await ctx.reply(t("rename.success", { title: newTitle }), threadOptions);
+    } else {
+      await ctx.reply(t("rename.success", { title: newTitle }));
+    }
 
     logger.info(`[RenameHandler] Session renamed successfully: ${newTitle}`);
   } catch (error) {
@@ -163,7 +189,7 @@ export async function handleRenameTextAnswer(ctx: Context): Promise<boolean> {
     await ctx.reply(t("rename.error"));
   }
 
-  renameManager.clear();
-  clearRenameInteraction("rename_completed");
+  renameManager.clear(scopeKey);
+  clearRenameInteraction("rename_completed", scopeKey);
   return true;
 }

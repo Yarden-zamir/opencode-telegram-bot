@@ -134,6 +134,7 @@ opencode-telegram config
 | `/abort`          | Abort the current task                                  |
 | `/detach`         | Detach from the current session without stopping it     |
 | `/sessions`       | Browse and switch between recent sessions               |
+| `/last`           | Show the latest assistant reply from the current session |
 | `/projects`       | Switch between OpenCode projects                        |
 | `/worktree`       | Switch between existing git worktrees                   |
 | `/open`           | Add a project by browsing directories                   |

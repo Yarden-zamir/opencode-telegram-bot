@@ -103,6 +103,7 @@ Current command set:
 - `/abort` - stop the current task
 - `/detach` - detach the bot from the current session without stopping it
 - `/sessions` - show and switch recent sessions
+- `/last` - show the latest assistant reply from the current session
 - `/projects` - show and switch projects
 - `/worktree` - show and switch existing git worktrees for the current repository
 - `/tts` - toggle global audio replies

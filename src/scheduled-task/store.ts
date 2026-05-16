@@ -1,9 +1,15 @@
-import { getScheduledTasks, setScheduledTasks } from "../settings/manager.js";
+import {
+  getScheduledTaskTopics,
+  getScheduledTasks,
+  setScheduledTaskTopics,
+  setScheduledTasks,
+} from "../settings/manager.js";
 import { logger } from "../utils/logger.js";
-import type { ScheduledTask } from "./types.js";
-import { cloneScheduledTask } from "./types.js";
+import type { ScheduledTask, ScheduledTaskTopicBinding } from "./types.js";
+import { cloneScheduledTask, cloneScheduledTaskTopicBinding } from "./types.js";
 
 let scheduledTaskMutationQueue: Promise<unknown> = Promise.resolve();
+let scheduledTaskTopicMutationQueue: Promise<unknown> = Promise.resolve();
 
 async function mutateScheduledTasks<T>(
   mutator: (tasks: ScheduledTask[]) =>
@@ -86,4 +92,64 @@ export async function updateScheduledTask(
       result: cloneScheduledTask(nextTask),
     };
   });
+}
+
+async function mutateScheduledTaskTopics<T>(
+  mutator: (
+    topics: ScheduledTaskTopicBinding[],
+  ) =>
+    | Promise<{ topics: ScheduledTaskTopicBinding[]; result: T }>
+    | { topics: ScheduledTaskTopicBinding[]; result: T },
+): Promise<T> {
+  const runMutation = async (): Promise<T> => {
+    const currentTopics = listScheduledTaskTopics();
+    const { topics, result } = await mutator(currentTopics);
+    await setScheduledTaskTopics(topics.map((topic) => cloneScheduledTaskTopicBinding(topic)));
+    return result;
+  };
+
+  const mutationPromise = scheduledTaskTopicMutationQueue.then(runMutation, runMutation);
+  scheduledTaskTopicMutationQueue = mutationPromise.catch(() => undefined);
+  return mutationPromise;
+}
+
+export function listScheduledTaskTopics(): ScheduledTaskTopicBinding[] {
+  return getScheduledTaskTopics().map((binding) => cloneScheduledTaskTopicBinding(binding));
+}
+
+export async function upsertScheduledTaskTopic(
+  topic: ScheduledTaskTopicBinding,
+): Promise<ScheduledTaskTopicBinding> {
+  return mutateScheduledTaskTopics((topics) => {
+    const nextTopics = topics.filter(
+      (candidate) =>
+        !(candidate.chatId === topic.chatId && candidate.projectId === topic.projectId),
+    );
+    nextTopics.push(cloneScheduledTaskTopicBinding(topic));
+
+    return {
+      topics: nextTopics,
+      result: cloneScheduledTaskTopicBinding(topic),
+    };
+  });
+}
+
+export async function getScheduledTaskTopicByChatAndProject(
+  chatId: number,
+  projectId: string,
+): Promise<ScheduledTaskTopicBinding | null> {
+  const binding = listScheduledTaskTopics().find(
+    (topic) => topic.chatId === chatId && topic.projectId === projectId,
+  );
+  return binding ? cloneScheduledTaskTopicBinding(binding) : null;
+}
+
+export async function getScheduledTaskTopicByChatAndThread(
+  chatId: number,
+  threadId: number,
+): Promise<ScheduledTaskTopicBinding | null> {
+  const binding = listScheduledTaskTopics().find(
+    (topic) => topic.chatId === chatId && topic.threadId === threadId,
+  );
+  return binding ? cloneScheduledTaskTopicBinding(binding) : null;
 }

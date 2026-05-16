@@ -11,9 +11,12 @@ import { pinnedMessageManager } from "../../pinned/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { sendBotText } from "../utils/telegram-text.js";
+import { getScopeFromContext, getThreadSendOptions } from "../scope.js";
 
 export async function statusCommand(ctx: CommandContext<Context>) {
   try {
+    const scope = getScopeFromContext(ctx);
+    const scopeKey = scope?.key;
     const { data, error } = await opencodeClient.global.health();
 
     if (error || !data) {
@@ -27,22 +30,22 @@ export async function statusCommand(ctx: CommandContext<Context>) {
       message += `${t("status.line.version", { version: data.version })}\n`;
     }
     message += `${t("status.line.tts", {
-      tts: isTtsEnabled() ? t("status.tts.on") : t("status.tts.off"),
+      tts: isTtsEnabled(scopeKey) ? t("status.tts.on") : t("status.tts.off"),
     })}\n`;
 
     // Add agent information
-    const currentAgent = await fetchCurrentAgent();
+    const currentAgent = await fetchCurrentAgent(scopeKey);
     const agentDisplay = currentAgent
       ? getAgentDisplayName(currentAgent)
       : t("status.agent_not_set");
     message += `${t("status.line.mode", { mode: agentDisplay })}\n`;
 
     // Add model information
-    const currentModel = fetchCurrentModel();
+    const currentModel = fetchCurrentModel(scopeKey);
     const modelDisplay = `🤖 ${currentModel.providerID}/${currentModel.modelID}`;
     message += `${t("status.line.model", { model: modelDisplay })}\n`;
 
-    const currentProject = getCurrentProject();
+    const currentProject = getCurrentProject(scopeKey);
     if (currentProject) {
       let projectDisplay = currentProject.worktree;
       let linkedWorktreePath: string | null = null;
@@ -70,7 +73,7 @@ export async function statusCommand(ctx: CommandContext<Context>) {
       message += t("status.project_hint");
     }
 
-    const currentSession = getCurrentSession();
+    const currentSession = getCurrentSession(scopeKey);
     if (currentSession) {
       message += `\n${t("status.session_selected", { title: currentSession.title })}\n`;
     } else {
@@ -79,30 +82,30 @@ export async function statusCommand(ctx: CommandContext<Context>) {
     }
 
     if (ctx.chat) {
-      if (!pinnedMessageManager.isInitialized()) {
-        pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
+      if (!pinnedMessageManager.isInitialized(scopeKey)) {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat.id, scopeKey, scope?.threadId ?? null);
       }
       // Fetch context limit if not yet loaded (e.g. fresh bot start)
-      if (pinnedMessageManager.getContextLimit() === 0) {
-        await pinnedMessageManager.refreshContextLimit();
+      if (pinnedMessageManager.getContextLimit(scopeKey) === 0) {
+        await pinnedMessageManager.refreshContextLimit(scopeKey);
       }
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
+      keyboardManager.initialize(ctx.api, ctx.chat.id, scopeKey);
     }
     // Sync current context (tokens used + limit) into keyboard state
-    const contextInfo = pinnedMessageManager.getContextInfo();
+    const contextInfo = pinnedMessageManager.getContextInfo(scopeKey);
     if (contextInfo) {
-      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit);
+      keyboardManager.updateContext(contextInfo.tokensUsed, contextInfo.tokensLimit, scopeKey);
     }
-    const keyboard = keyboardManager.getKeyboard();
+    const keyboard = keyboardManager.getKeyboard(scopeKey);
     if (ctx.chat) {
       await sendBotText({
         api: ctx.api,
         chatId: ctx.chat.id,
         text: message,
-        options: { reply_markup: keyboard },
+        options: { reply_markup: keyboard, ...getThreadSendOptions(scope?.threadId ?? null) },
       });
     } else {
-      await ctx.reply(message, { reply_markup: keyboard });
+      await ctx.reply(message, { reply_markup: keyboard, ...getThreadSendOptions(scope?.threadId ?? null) });
     }
   } catch (error) {
     logger.error("[Bot] Error checking server status:", error);

@@ -91,9 +91,9 @@ export interface TokensInfo {
   cacheWrite: number;
 }
 
-type TokensCallback = (tokens: TokensInfo, isCompleted: boolean) => void;
+type TokensCallback = (sessionId: string, tokens: TokensInfo, isCompleted: boolean) => void;
 
-type CostCallback = (cost: number) => void;
+type CostCallback = (sessionId: string, cost: number) => void;
 
 export type SubagentStatus = "pending" | "running" | "completed" | "error";
 
@@ -138,7 +138,7 @@ type PermissionCallback = (request: PermissionRequest) => void;
 
 type SessionDiffCallback = (sessionId: string, diffs: FileChange[]) => void;
 
-type FileChangeCallback = (change: FileChange) => void;
+type FileChangeCallback = (sessionId: string, change: FileChange) => void;
 
 type ClearedCallback = () => void;
 
@@ -1080,7 +1080,7 @@ class SummaryAggregator {
           `[Aggregator] Tokens: input=${tokens.input}, output=${tokens.output}, reasoning=${tokens.reasoning}, cacheRead=${tokens.cacheRead}, cacheWrite=${tokens.cacheWrite}, completed=${isCompleted}`,
         );
         // Call synchronously so keyboardManager is updated before onComplete sends the reply
-        this.onTokensCallback(tokens, isCompleted);
+        this.onTokensCallback(info.sessionID, tokens, isCompleted);
       }
 
       if (isCompleted) {
@@ -1093,7 +1093,7 @@ class SummaryAggregator {
         // Extract and report cost
         if (this.onCostCallback && assistantInfo.cost !== undefined) {
           logger.debug(`[Aggregator] Cost: $${assistantInfo.cost.toFixed(2)}`);
-          this.onCostCallback(assistantInfo.cost);
+          this.onCostCallback(info.sessionID, assistantInfo.cost);
         }
 
         if (this.onCompleteCallback && finalText.length > 0) {
@@ -1312,7 +1312,7 @@ class SummaryAggregator {
           }
 
           if (preparedFileContext.fileChange && this.onFileChangeCallback) {
-            this.onFileChangeCallback(preparedFileContext.fileChange);
+            this.onFileChangeCallback(part.sessionID, preparedFileContext.fileChange);
           }
         }
       }

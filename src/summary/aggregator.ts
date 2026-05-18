@@ -1016,6 +1016,13 @@ class SummaryAggregator {
       return;
     }
 
+    if (info.role === "user") {
+      const messageID = info.id;
+      this.messages.set(messageID, { role: info.role });
+      this.emitExternalUserInputIfReady(info.sessionID, messageID);
+      return;
+    }
+
     if (info.sessionID !== this.currentSessionId) {
       return;
     }
@@ -1023,11 +1030,6 @@ class SummaryAggregator {
     const messageID = info.id;
 
     this.messages.set(messageID, { role: info.role });
-
-    if (info.role === "user") {
-      this.emitExternalUserInputIfReady(info.sessionID, messageID);
-      return;
-    }
 
     if (info.role === "assistant") {
       if (!this.textMessageStates.has(messageID)) {
@@ -1135,7 +1137,19 @@ class SummaryAggregator {
     const isCurrentRootSession = part.sessionID === this.currentSessionId;
     const isTrackedChildSession = this.isTrackedChildSession(part.sessionID);
 
-    if (!isCurrentRootSession && !isTrackedChildSession) {
+    const messageID = part.messageID;
+    const messageInfo = this.messages.get(messageID);
+
+    if (!isCurrentRootSession && !isTrackedChildSession && !messageInfo) {
+      if (part.type === "text" && "text" in part && part.text) {
+        this.registerKnownTextPart(messageID, part.id);
+        this.registerTextPart(messageID, part.id);
+        this.setOptimisticTextSnapshot(messageID, part.id, part.text);
+      }
+      return;
+    }
+
+    if (!isCurrentRootSession && !isTrackedChildSession && messageInfo?.role !== "user") {
       return;
     }
 
@@ -1171,9 +1185,6 @@ class SummaryAggregator {
       this.lastUpdated = Date.now();
       return;
     }
-
-    const messageID = part.messageID;
-    const messageInfo = this.messages.get(messageID);
 
     if (part.type === "text") {
       this.registerKnownTextPart(messageID, part.id);
@@ -1365,7 +1376,8 @@ class SummaryAggregator {
     delta: string,
     fullTextHint?: string,
   ): void {
-    if (sessionID !== this.currentSessionId) {
+    const messageInfo = this.messages.get(messageID);
+    if (sessionID !== this.currentSessionId && messageInfo?.role !== "user") {
       return;
     }
 
@@ -1386,7 +1398,6 @@ class SummaryAggregator {
       return;
     }
 
-    const messageInfo = this.messages.get(messageID);
     if (messageInfo?.role === "user") {
       this.emitExternalUserInputIfReady(sessionID, messageID);
       return;
@@ -1397,7 +1408,7 @@ class SummaryAggregator {
   }
 
   private emitExternalUserInputIfReady(sessionId: string, messageId: string): void {
-    if (sessionId !== this.currentSessionId || this.deliveredExternalUserMessageIds.has(messageId)) {
+    if (this.deliveredExternalUserMessageIds.has(messageId)) {
       return;
     }
 
@@ -1779,13 +1790,6 @@ class SummaryAggregator {
   ): void {
     const { id, sessionID, questions } = event.properties;
 
-    if (sessionID !== this.currentSessionId) {
-      logger.debug(
-        `[Aggregator] Ignoring question.asked for different session: ${sessionID} (current: ${this.currentSessionId})`,
-      );
-      return;
-    }
-
     logger.info(`[Aggregator] Question asked: requestID=${id}, questions=${questions.length}`);
 
     if (this.onQuestionCallback) {
@@ -1832,13 +1836,6 @@ class SummaryAggregator {
     },
   ): void {
     const request = event.properties;
-
-    if (request.sessionID !== this.currentSessionId) {
-      logger.debug(
-        `[Aggregator] Ignoring permission.asked for different session: ${request.sessionID} (current: ${this.currentSessionId})`,
-      );
-      return;
-    }
 
     logger.info(
       `[Aggregator] Permission asked: requestID=${request.id}, type=${request.permission}, patterns=${request.patterns.length}`,

@@ -15,10 +15,10 @@ interface ExternalUserInputNotification {
 interface DeliverExternalUserInputParams {
   api: SendMessageApi;
   chatId: number;
-  currentSessionId: string | null;
   sessionId: string;
   text: string;
   consumeSuppressedInput: (sessionId: string, text: string) => boolean;
+  options?: Parameters<SendMessageApi["sendMessage"]>[2];
 }
 
 function normalizeExternalUserInputText(text: string): string {
@@ -66,13 +66,13 @@ export function buildExternalUserInputNotification(text: string): ExternalUserIn
 export async function deliverExternalUserInputNotification({
   api,
   chatId,
-  currentSessionId,
   sessionId,
   text,
   consumeSuppressedInput,
+  options,
 }: DeliverExternalUserInputParams): Promise<boolean> {
   const notification = buildExternalUserInputNotification(text);
-  if (!notification || currentSessionId !== sessionId) {
+  if (!notification) {
     return false;
   }
 
@@ -85,6 +85,7 @@ export async function deliverExternalUserInputNotification({
     chatId,
     text: notification.text,
     rawFallbackText: notification.rawFallbackText,
+    options,
     format: "markdown_v2",
   });
 

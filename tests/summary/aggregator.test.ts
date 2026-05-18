@@ -704,7 +704,7 @@ describe("summary/aggregator", () => {
     );
   });
 
-  it("ignores external user input from a different session", async () => {
+  it("emits external user input from a different session for topic routing", async () => {
     const onExternalUserInput = vi.fn();
     summaryAggregator.setOnExternalUserInput(onExternalUserInput);
     summaryAggregator.setSession("session-1");
@@ -737,7 +737,11 @@ describe("summary/aggregator", () => {
 
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(onExternalUserInput).not.toHaveBeenCalled();
+    expect(onExternalUserInput).toHaveBeenCalledWith(
+      "session-2",
+      "message-user-other",
+      "Hello from another session",
+    );
   });
 
   it("does not emit whitespace-only external user input", async () => {

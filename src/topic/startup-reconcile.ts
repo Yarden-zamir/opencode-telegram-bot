@@ -117,6 +117,32 @@ async function createTopicForSession(
   return true;
 }
 
+export async function reconcileSessionWithForumTopic(
+  api: TopicCreateApi,
+  session: SessionListItem,
+  reason: string,
+): Promise<boolean> {
+  if (!session.directory) {
+    return false;
+  }
+
+  const context = getStoredForumProjectContexts().find(
+    (candidate) => candidate.project.worktree === session.directory,
+  );
+  if (!context) {
+    return false;
+  }
+
+  const created = await createTopicForSession(api, context, session);
+  if (created) {
+    logger.info(
+      `[TopicStartup] Created forum topic for unbound session: chat=${context.chatId}, session=${session.id}, reason=${reason}`,
+    );
+  }
+
+  return created;
+}
+
 export async function reconcileStoredSessionsWithForumTopics(
   api: TopicCreateApi,
   reason: string,
@@ -133,7 +159,7 @@ export async function reconcileStoredSessionsWithForumTopics(
       let createdCount = 0;
 
       for (const session of sessions) {
-        if (await createTopicForSession(api, context, session)) {
+        if (await reconcileSessionWithForumTopic(api, session, reason)) {
           createdCount += 1;
         }
       }

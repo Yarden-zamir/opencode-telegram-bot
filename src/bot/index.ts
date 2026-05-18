@@ -17,12 +17,7 @@ import {
   MODEL_BUTTON_TEXT_PATTERN,
   VARIANT_BUTTON_TEXT_PATTERN,
 } from "./message-patterns.js";
-import {
-  buildBackgroundSessionOpenKeyboard,
-  handleBackgroundSessionOpen,
-  handleSessionSelect,
-  sessionsCommand,
-} from "./commands/sessions.js";
+import { handleBackgroundSessionOpen, handleSessionSelect, sessionsCommand } from "./commands/sessions.js";
 import { newCommand } from "./commands/new.js";
 import { projectsCommand, handleProjectSelect } from "./commands/projects.js";
 import { worktreeCommand, handleWorktreeCallback } from "./commands/worktree.js";
@@ -63,12 +58,12 @@ import { interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
 import { keyboardManager } from "../keyboard/manager.js";
 import { stopEventListening, subscribeToEvents } from "../opencode/events.js";
+import { opencodeClient } from "../opencode/client.js";
 import { opencodeReadyLifecycle } from "../opencode/ready-lifecycle.js";
 import { summaryAggregator } from "../summary/aggregator.js";
 import { formatToolInfo } from "../summary/formatter.js";
 import { renderSubagentCards } from "../summary/subagent-formatter.js";
 import { ToolMessageBatcher } from "../summary/tool-message-batcher.js";
-import { getCurrentSession } from "../session/manager.js";
 import { ingestSessionInfoForCache } from "../session/cache-manager.js";
 import { logger } from "../utils/logger.js";
 import { safeBackgroundTask } from "../utils/safe-background-task.js";
@@ -117,11 +112,8 @@ import {
 } from "./utils/assistant-rendering.js";
 import { deliverExternalUserInputNotification } from "./utils/external-user-input.js";
 import { clearWrapperToolTelegramContext } from "../wrapper-tools/server.js";
-import {
-  backgroundSessionTracker,
-  type BackgroundSessionNotification,
-} from "../background-session/tracker.js";
-import { getSessionRouteTarget } from "../topic/manager.js";
+import { backgroundSessionTracker, type BackgroundSessionNotification } from "../background-session/tracker.js";
+import { getSessionRouteTarget, getTopicBindingBySessionId } from "../topic/manager.js";
 import { getScopeFromContext, getScopeKeyFromContext, getThreadSendOptions } from "./scope.js";
 import { syncTopicTitleForSession } from "../topic/title-sync.js";
 import { ensureGeneralTopicName } from "./middleware/general-topic-name.js";
@@ -150,17 +142,7 @@ interface SessionDeliveryTarget {
 }
 
 function getSessionDeliveryTarget(sessionId: string): SessionDeliveryTarget | null {
-  const topicTarget = getSessionRouteTarget(sessionId);
-  if (topicTarget) {
-    return topicTarget;
-  }
-
-  const currentSession = getCurrentSession();
-  if (!chatIdInstance || currentSession?.id !== sessionId) {
-    return null;
-  }
-
-  return { chatId: chatIdInstance, threadId: null };
+  return getSessionRouteTarget(sessionId);
 }
 
 function isCurrentOrRoutableSession(sessionId: string): boolean {
@@ -415,46 +397,62 @@ function getToolStreamKey(tool: string): ToolStreamKey {
   return "default";
 }
 
-function formatShortSessionId(sessionId: string): string {
-  return sessionId.length <= 8 ? sessionId : sessionId.slice(0, 8);
-}
-
-function getBackgroundSessionLabel(notification: BackgroundSessionNotification): string {
-  const title = notification.sessionTitle?.trim();
-  if (title) {
-    return title;
-  }
-
-  return t("background.session_fallback", { id: formatShortSessionId(notification.sessionId) });
-}
-
-function formatBackgroundSessionNotification(notification: BackgroundSessionNotification): string {
-  const session = getBackgroundSessionLabel(notification);
-
-  switch (notification.kind) {
-    case "assistant_response":
-      return t("background.assistant_response", { session });
-    case "question_asked":
-      return t("background.question_asked", { session });
-    case "permission_asked":
-      return t("background.permission_asked", { session });
-  }
-}
-
 async function deliverBackgroundSessionNotification(
   notification: BackgroundSessionNotification,
 ): Promise<void> {
-  if (!botInstance || !chatIdInstance) {
+  if (!botInstance || notification.kind !== "assistant_response") {
     return;
   }
 
-  await botInstance.api.sendMessage(
-    chatIdInstance,
-    formatBackgroundSessionNotification(notification),
-    {
-      reply_markup: buildBackgroundSessionOpenKeyboard(notification.sessionId, notification.kind),
-    },
-  );
+  const target = getSessionDeliveryTarget(notification.sessionId);
+  const binding = getTopicBindingBySessionId(notification.sessionId);
+  if (!target || !binding?.projectWorktree) {
+    logger.warn(
+      `[Bot] Dropping assistant response for unbound session: session=${notification.sessionId}`,
+    );
+    return;
+  }
+
+  const { data: message, error } = notification.messageId
+    ? await opencodeClient.session.message({
+        sessionID: notification.sessionId,
+        messageID: notification.messageId,
+        directory: binding.projectWorktree,
+      })
+    : await opencodeClient.session.messages({
+        sessionID: notification.sessionId,
+        directory: binding.projectWorktree,
+        limit: 1,
+      });
+
+  if (error || !message) {
+    logger.warn("[Bot] Failed to load background assistant response for bound topic", {
+      sessionId: notification.sessionId,
+      messageId: notification.messageId,
+      error,
+    });
+    return;
+  }
+
+  const messageLike = Array.isArray(message) ? message[0] : message;
+  const responseText = (messageLike.parts as Array<{ type: string; text?: string }>)
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+    .trim();
+  if (!responseText) {
+    return;
+  }
+
+  const parts = renderAssistantFinalPartsSafe(responseText);
+  for (const part of parts) {
+    await sendRenderedBotPart({
+      api: botInstance.api,
+      chatId: target.chatId,
+      part,
+      options: getThreadSendOptions(target.threadId),
+    });
+  }
 }
 
 type EventStreamItem = {
@@ -644,19 +642,25 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
   summaryAggregator.setOnExternalUserInput(async (sessionId, _messageId, messageText) => {
     void enqueueSessionCompletionTask(sessionId, async () => {
-      if (!botInstance || !chatIdInstance) {
+      if (!botInstance) {
+        return;
+      }
+
+      const target = getSessionDeliveryTarget(sessionId);
+      if (!target) {
+        logger.warn(`[Bot] Dropping external user input for unbound session: session=${sessionId}`);
         return;
       }
 
       try {
         await deliverExternalUserInputNotification({
           api: botInstance.api,
-          chatId: chatIdInstance,
-          currentSessionId: getCurrentSession()?.id ?? null,
+          chatId: target.chatId,
           sessionId,
           text: messageText,
           consumeSuppressedInput: (incomingSessionId, incomingText) =>
             externalUserInputSuppressionManager.consume(incomingSessionId, incomingText),
+          options: getThreadSendOptions(target.threadId),
         });
       } catch (err) {
         logger.error("[Bot] Failed to deliver external user input to Telegram:", err);
@@ -1106,7 +1110,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     }
 
     if (config.bot.trackBackgroundSessions) {
-      backgroundSessionTracker.processEvent(event, getCurrentSession()?.id ?? null);
+      backgroundSessionTracker.processEvent(event, attachManager.getSnapshot()?.sessionId ?? null);
     }
 
     summaryAggregator.processEvent(event);

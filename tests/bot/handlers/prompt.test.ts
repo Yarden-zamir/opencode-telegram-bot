@@ -18,6 +18,8 @@ const mocked = vi.hoisted(() => ({
   sessionPromptMock: vi.fn(),
   sessionPromptAsyncMock: vi.fn(),
   sessionCreateMock: vi.fn(),
+  setCurrentSessionMock: vi.fn(),
+  clearSessionMock: vi.fn(),
   suppressionRegisterMock: vi.fn(),
   safeBackgroundTaskMock: vi.fn(),
   setSessionSummaryMock: vi.fn(),
@@ -41,8 +43,8 @@ vi.mock("../../../src/opencode/client.js", () => ({
 
 vi.mock("../../../src/session/manager.js", () => ({
   getCurrentSession: vi.fn(() => mocked.currentSession),
-  setCurrentSession: vi.fn(),
-  clearSession: vi.fn(),
+  setCurrentSession: mocked.setCurrentSessionMock,
+  clearSession: mocked.clearSessionMock,
 }));
 
 vi.mock("../../../src/session/cache-manager.js", () => ({
@@ -203,6 +205,8 @@ describe("bot/handlers/prompt", () => {
     mocked.sessionPromptMock.mockReset();
     mocked.sessionPromptAsyncMock.mockReset();
     mocked.sessionCreateMock.mockReset();
+    mocked.setCurrentSessionMock.mockReset();
+    mocked.clearSessionMock.mockReset();
     mocked.suppressionRegisterMock.mockReset();
     mocked.safeBackgroundTaskMock.mockReset();
     mocked.setSessionSummaryMock.mockReset();
@@ -413,5 +417,61 @@ describe("bot/handlers/prompt", () => {
       { message_thread_id: 77 },
     );
     expect(mocked.attachToSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("restores the topic-bound session when scoped current session drifted", async () => {
+    mocked.currentSession = {
+      id: "session-stale",
+      title: "Stale session",
+      directory: mocked.currentProject.worktree,
+    };
+    mocked.getTopicBindingByScopeKeyMock.mockReturnValueOnce({
+      sessionId: "session-bound",
+      topicName: "Bound session",
+      projectWorktree: mocked.currentProject.worktree,
+    });
+
+    const ctx = createTopicContext(77);
+    const deps = createDeps();
+    const handled = await processUserPrompt(ctx, "Run this", deps);
+
+    expect(handled).toBe(true);
+    expect(mocked.clearSessionMock).toHaveBeenCalledWith("-100777:77");
+    expect(mocked.setCurrentSessionMock).toHaveBeenCalledWith(
+      {
+        id: "session-bound",
+        title: "Bound session",
+        directory: mocked.currentProject.worktree,
+      },
+      "-100777:77",
+    );
+    expect(mocked.attachToSessionMock).toHaveBeenCalledWith({
+      bot: expect.any(Object),
+      chatId: -100777,
+      session: {
+        id: "session-bound",
+        title: "Bound session",
+        directory: mocked.currentProject.worktree,
+      },
+      ensureEventSubscription: expect.any(Function),
+      scopeKey: "-100777:77",
+      threadId: 77,
+    });
+    expect(mocked.registerTopicSessionBindingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-bound",
+        scopeKey: "-100777:77",
+      }),
+    );
+
+    const backgroundTask = getScheduledBackgroundTask();
+    await backgroundTask.task();
+
+    expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionID: "session-bound",
+        directory: mocked.currentProject.worktree,
+      }),
+    );
   });
 });

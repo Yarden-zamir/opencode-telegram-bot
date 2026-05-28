@@ -48,10 +48,11 @@ export function createOpencodeServeSpawnCommand(
 ): OpencodeServeSpawnCommand {
   const isWindows = process.platform === "win32";
   const port = target.port.toString();
+  const args = ["serve", "--hostname", target.host, "--port", port];
 
   return {
     command: isWindows ? "cmd.exe" : "opencode",
-    args: isWindows ? ["/c", "opencode", "serve", "--port", port] : ["serve", "--port", port],
+    args: isWindows ? ["/c", "opencode", ...args] : args,
     windowsHide: isWindows,
   };
 }

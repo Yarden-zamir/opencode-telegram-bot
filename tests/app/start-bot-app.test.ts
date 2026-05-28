@@ -7,6 +7,7 @@ const mocked = vi.hoisted(() => ({
   autoRestartStopMock: vi.fn(),
   notifyOpencodeReadyIfHealthyMock: vi.fn(),
   registerOpenCodeReadyRefreshHandlerMock: vi.fn(),
+  checkLocalOpencodeServerBindAddressMock: vi.fn(),
   loadSettingsMock: vi.fn(),
   scheduledTaskInitializeMock: vi.fn(),
   scheduledTaskShutdownMock: vi.fn(),
@@ -49,6 +50,10 @@ vi.mock("../../src/opencode/auto-restart.js", () => ({
 vi.mock("../../src/opencode/ready-refresh.js", () => ({
   notifyOpencodeReadyIfHealthy: mocked.notifyOpencodeReadyIfHealthyMock,
   registerOpenCodeReadyRefreshHandler: mocked.registerOpenCodeReadyRefreshHandlerMock,
+}));
+
+vi.mock("../../src/opencode/binding-check.js", () => ({
+  checkLocalOpencodeServerBindAddress: mocked.checkLocalOpencodeServerBindAddressMock,
 }));
 
 vi.mock("../../src/settings/manager.js", () => ({
@@ -123,6 +128,7 @@ describe("app/start-bot-app", () => {
     mocked.autoRestartStopMock.mockReset();
     mocked.notifyOpencodeReadyIfHealthyMock.mockReset();
     mocked.registerOpenCodeReadyRefreshHandlerMock.mockReset();
+    mocked.checkLocalOpencodeServerBindAddressMock.mockReset();
     mocked.loadSettingsMock.mockReset();
     mocked.scheduledTaskInitializeMock.mockReset();
     mocked.scheduledTaskShutdownMock.mockReset();
@@ -140,6 +146,7 @@ describe("app/start-bot-app", () => {
     mocked.createBotMock.mockReturnValue(createBot());
     mocked.autoRestartStartMock.mockResolvedValue(false);
     mocked.notifyOpencodeReadyIfHealthyMock.mockResolvedValue(false);
+    mocked.checkLocalOpencodeServerBindAddressMock.mockResolvedValue(false);
     mocked.loadSettingsMock.mockResolvedValue(undefined);
     mocked.scheduledTaskInitializeMock.mockResolvedValue(undefined);
     mocked.reconcileStoredModelSelectionMock.mockResolvedValue(undefined);
@@ -163,6 +170,15 @@ describe("app/start-bot-app", () => {
     await flushBackgroundTasks();
 
     expect(mocked.notifyOpencodeReadyIfHealthyMock).toHaveBeenCalledWith("startup");
+  });
+
+  it("checks local OpenCode bind address after startup health reports ready", async () => {
+    mocked.notifyOpencodeReadyIfHealthyMock.mockResolvedValue(true);
+
+    await startBotApp();
+    await flushBackgroundTasks();
+
+    expect(mocked.checkLocalOpencodeServerBindAddressMock).toHaveBeenCalledWith("startup");
   });
 
   it("starts Telegram polling without waiting for OpenCode startup checks", async () => {

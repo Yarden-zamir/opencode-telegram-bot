@@ -20,6 +20,7 @@ import { getLogFilePath, initializeLogger, logger } from "../utils/logger.js";
 import { wrapperToolServer } from "../wrapper-tools/server.js";
 import { safeBackgroundTask } from "../utils/safe-background-task.js";
 import { reconcileStoredSessionsWithForumTopics } from "../topic/startup-reconcile.js";
+import { checkLocalOpencodeServerBindAddress } from "../opencode/binding-check.js";
 
 const SHUTDOWN_TIMEOUT_MS = 5000;
 
@@ -67,7 +68,10 @@ export async function startBotApp(): Promise<void> {
     taskName: "app.opencodeStartup",
     task: async () => {
       await opencodeAutoRestartService.start();
-      await notifyOpencodeReadyIfHealthy("startup");
+      const readyNotificationSent = await notifyOpencodeReadyIfHealthy("startup");
+      if (readyNotificationSent || opencodeReadyLifecycle.isReady()) {
+        await checkLocalOpencodeServerBindAddress("startup");
+      }
     },
   });
 

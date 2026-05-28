@@ -435,6 +435,7 @@ export async function processUserPrompt(
   const scopeKey = scope?.key;
   const responseMode = options.responseMode ?? (isTtsEnabled(scopeKey) ? "text_and_tts" : "text_only");
 
+  let topicBinding: ReturnType<typeof getTopicBindingByScopeKey>;
   if (scope && isTopicScope(scope) && ctx.chat && typeof scope.threadId === "number") {
     const scheduledTopic = await getScheduledTaskTopicByChatAndThread(ctx.chat.id, scope.threadId);
     if (scheduledTopic) {
@@ -442,7 +443,8 @@ export async function processUserPrompt(
       return false;
     }
 
-    if (!getTopicBindingByScopeKey(scope.key)) {
+    topicBinding = getTopicBindingByScopeKey(scope.key);
+    if (!topicBinding) {
       await ctx.reply(t("topic.unbound"), getThreadSendOptions(scope.threadId));
       return false;
     }
@@ -459,6 +461,19 @@ export async function processUserPrompt(
 
   let currentSession = getCurrentSession(scopeKey);
   let createdNewSession = false;
+
+  if (topicBinding && (!currentSession || currentSession.id !== topicBinding.sessionId)) {
+    currentSession = {
+      id: topicBinding.sessionId,
+      title: topicBinding.topicName ?? "Session",
+      directory: topicBinding.projectWorktree ?? currentProject.worktree,
+    };
+    logger.warn(
+      `[Bot] Restoring topic-bound session: scope=${scopeKey}, session=${currentSession.id}`,
+    );
+    clearSession(scopeKey);
+    setCurrentSession(currentSession, scopeKey);
+  }
 
   if (currentSession && currentSession.directory !== currentProject.worktree) {
     logger.warn(

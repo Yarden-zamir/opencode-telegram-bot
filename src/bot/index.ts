@@ -111,6 +111,7 @@ import {
   renderAssistantFinalPartsSafe,
 } from "./utils/assistant-rendering.js";
 import { deliverExternalUserInputNotification } from "./utils/external-user-input.js";
+import { deliverBoundTopicAssistantResponse } from "./utils/background-session-notification.js";
 import { clearWrapperToolTelegramContext } from "../wrapper-tools/server.js";
 import { backgroundSessionTracker, type BackgroundSessionNotification } from "../background-session/tracker.js";
 import { getSessionRouteTarget, getTopicBindingBySessionId } from "../topic/manager.js";
@@ -413,44 +414,18 @@ async function deliverBackgroundSessionNotification(
     return;
   }
 
-  const { data: message, error } = notification.messageId
-    ? await opencodeClient.session.message({
-        sessionID: notification.sessionId,
-        messageID: notification.messageId,
-        directory: binding.projectWorktree,
-      })
-    : await opencodeClient.session.messages({
-        sessionID: notification.sessionId,
-        directory: binding.projectWorktree,
-        limit: 1,
-      });
+  const delivered = await deliverBoundTopicAssistantResponse({
+    api: botInstance.api,
+    client: opencodeClient,
+    notification,
+    target,
+    projectWorktree: binding.projectWorktree,
+  });
 
-  if (error || !message) {
+  if (!delivered) {
     logger.warn("[Bot] Failed to load background assistant response for bound topic", {
       sessionId: notification.sessionId,
       messageId: notification.messageId,
-      error,
-    });
-    return;
-  }
-
-  const messageLike = Array.isArray(message) ? message[0] : message;
-  const responseText = (messageLike.parts as Array<{ type: string; text?: string }>)
-    .filter((part) => part.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("")
-    .trim();
-  if (!responseText) {
-    return;
-  }
-
-  const parts = renderAssistantFinalPartsSafe(responseText);
-  for (const part of parts) {
-    await sendRenderedBotPart({
-      api: botInstance.api,
-      chatId: target.chatId,
-      part,
-      options: getThreadSendOptions(target.threadId),
     });
   }
 }

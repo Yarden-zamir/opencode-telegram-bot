@@ -16,6 +16,7 @@ import { logger } from "../utils/logger.js";
 const TOOL_FILE_NAME = "opencode_telegram_bot.ts";
 const MAX_REQUEST_BYTES = 64 * 1024;
 const TELEGRAM_MESSAGE_LIMIT = 4096;
+const DEFAULT_BIND_HOST = "127.0.0.1";
 
 type ToolName =
   | "notify"
@@ -327,9 +328,11 @@ export class WrapperToolServer {
       void this.handleRequest(request, response);
     });
 
+    const bindHost = process.env.OPENCODE_TELEGRAM_WRAPPER_BIND_HOST || DEFAULT_BIND_HOST;
+
     await new Promise<void>((resolve, reject) => {
       this.server?.once("error", reject);
-      this.server?.listen(0, "127.0.0.1", () => resolve());
+      this.server?.listen(0, bindHost, () => resolve());
     });
 
     const address = this.server.address();
@@ -337,7 +340,8 @@ export class WrapperToolServer {
       throw new Error("Failed to resolve wrapper tool server address");
     }
 
-    this.endpoint = `http://127.0.0.1:${address.port}`;
+    const endpointHost = process.env.OPENCODE_TELEGRAM_WRAPPER_ENDPOINT_HOST || bindHost;
+    this.endpoint = `http://${endpointHost}:${address.port}`;
     let toolFilePath: string;
     try {
       toolFilePath = await installOpenCodeToolFile(this.endpoint, this.token);

@@ -83,6 +83,8 @@ describe("wrapper-tools/server", () => {
   afterEach(async () => {
     await server.stop();
     delete process.env.XDG_CONFIG_HOME;
+    delete process.env.OPENCODE_TELEGRAM_WRAPPER_BIND_HOST;
+    delete process.env.OPENCODE_TELEGRAM_WRAPPER_ENDPOINT_HOST;
     await rm(tempConfigHome, { recursive: true, force: true });
   });
 
@@ -121,5 +123,16 @@ describe("wrapper-tools/server", () => {
     expect(response.status).toBe(400);
     expect(body.ok).toBe(false);
     expect(body.error).toContain("current Telegram OpenCode session");
+  });
+
+  it("can advertise a different endpoint host than the bind host", async () => {
+    process.env.OPENCODE_TELEGRAM_WRAPPER_BIND_HOST = "0.0.0.0";
+    process.env.OPENCODE_TELEGRAM_WRAPPER_ENDPOINT_HOST = "bot";
+
+    await server.start();
+    const toolFilePath = path.join(tempConfigHome, "opencode", "tools", "opencode_telegram_bot.ts");
+    const content = await fs.readFile(toolFilePath, "utf-8");
+
+    expect(content).toContain('const ENDPOINT = "http://bot:');
   });
 });

@@ -228,6 +228,13 @@ describe("model/manager", () => {
       expect(result.favorites).toHaveLength(1);
       expect(result.favorites[0]).toEqual({ providerID: "opencode", modelID: "big-pickle" });
       expect(result.recent).toHaveLength(0);
+      expect(loggerInfoMock).toHaveBeenCalledWith(
+        "[ModelManager] OpenCode model state does not exist, using config model as favorite",
+      );
+      expect(loggerWarnMock).not.toHaveBeenCalledWith(
+        expect.stringContaining("Failed to load OpenCode model state"),
+        expect.anything(),
+      );
     });
 
     it("returns empty lists when file does not exist and no config model", async () => {

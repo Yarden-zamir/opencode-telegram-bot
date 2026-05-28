@@ -307,11 +307,18 @@ export async function getModelSelectionLists(): Promise<ModelSelectionLists> {
 
     return { favorites, recent };
   } catch (err) {
+    const errorCode = (err as NodeJS.ErrnoException)?.code;
     if (envDefaultModel) {
-      logger.warn(
-        "[ModelManager] Failed to load OpenCode model state, using config model as favorite:",
-        err,
-      );
+      if (errorCode === "ENOENT") {
+        logger.info(
+          "[ModelManager] OpenCode model state does not exist, using config model as favorite",
+        );
+      } else {
+        logger.warn(
+          "[ModelManager] Failed to load OpenCode model state, using config model as favorite:",
+          err,
+        );
+      }
       return {
         favorites: [envDefaultModel],
         recent: [],

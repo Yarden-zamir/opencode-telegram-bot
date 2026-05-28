@@ -8,7 +8,7 @@
 [![Community](https://img.shields.io/badge/Community-Telegram-26A5E4?logo=telegram&logoColor=white)](https://t.me/+Fj_IyKRi6-41MGUy)
 
 OpenCode Telegram Bot is a secure Telegram client for [OpenCode](https://opencode.ai) CLI that runs on your local machine.
-
+ 
 Run AI coding tasks, monitor progress, switch models, and manage sessions from your phone.
 
 No open ports, no exposed APIs. The bot communicates with your local OpenCode server and the Telegram Bot API only.

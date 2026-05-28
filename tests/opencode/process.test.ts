@@ -26,12 +26,12 @@ describe("opencode/process", () => {
   });
 
   it("builds opencode serve command with the configured local port", () => {
-    const command = createOpencodeServeSpawnCommand({ host: "localhost", port: 4987 });
+    const command = createOpencodeServeSpawnCommand({ host: "0.0.0.0", port: 4987 });
 
     if (process.platform === "win32") {
       expect(command).toEqual({
         command: "cmd.exe",
-        args: ["/c", "opencode", "serve", "--port", "4987"],
+        args: ["/c", "opencode", "serve", "--hostname", "0.0.0.0", "--port", "4987"],
         windowsHide: true,
       });
       return;
@@ -39,7 +39,7 @@ describe("opencode/process", () => {
 
     expect(command).toEqual({
       command: "opencode",
-      args: ["serve", "--port", "4987"],
+      args: ["serve", "--hostname", "0.0.0.0", "--port", "4987"],
       windowsHide: false,
     });
   });

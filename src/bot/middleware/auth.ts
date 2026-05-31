@@ -9,6 +9,11 @@ export async function authMiddleware(ctx: Context, next: NextFunction): Promise<
     `[Auth] Checking access: userId=${userId}, allowedUserId=${config.telegram.allowedUserId}, hasCallbackQuery=${!!ctx.callbackQuery}, hasMessage=${!!ctx.message}`,
   );
 
+  if (ctx.from?.is_bot === true) {
+    logger.debug(`[Auth] Ignoring bot-origin update from userId=${userId}`);
+    return;
+  }
+
   if (userId && userId === config.telegram.allowedUserId) {
     logger.debug(`[Auth] Access granted for userId=${userId}`);
     await next();

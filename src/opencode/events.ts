@@ -12,8 +12,13 @@ type EventStreamSubscription = {
 type EventSubscriptionResult = {
   stream?: AsyncGenerator<unknown, unknown, unknown> | null;
 };
+type EventSubscriptionOptions = {
+  signal?: AbortSignal;
+  sseMaxRetryAttempts?: number;
+  onSseError?: (error: unknown) => void;
+};
 type OptionalGlobalEventApi = {
-  event?: (options?: { signal?: AbortSignal }) => Promise<EventSubscriptionResult>;
+  event?: (options?: EventSubscriptionOptions) => Promise<EventSubscriptionResult>;
 };
 type OptionalGlobalEventClient = {
   global?: OptionalGlobalEventApi;
@@ -74,6 +79,57 @@ function isSameDirectory(left: string, right: string): boolean {
   return normalizeDirectoryForComparison(left) === normalizeDirectoryForComparison(right);
 }
 
+function createSubscriptionAbortSignal(parentSignal: AbortSignal): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+
+  if (parentSignal.aborted) {
+    controller.abort(parentSignal.reason);
+    return { signal: controller.signal, cleanup: () => undefined };
+  }
+
+  const onAbort = () => controller.abort(parentSignal.reason);
+  parentSignal.addEventListener("abort", onAbort, { once: true });
+
+  return {
+    signal: controller.signal,
+    cleanup: () => parentSignal.removeEventListener("abort", onAbort),
+  };
+}
+
+function createSingleAttemptSubscription(parentSignal: AbortSignal): {
+  options: EventSubscriptionOptions;
+  wrapStream: (stream: AsyncGenerator<unknown, unknown, unknown>) => AsyncGenerator<unknown, unknown, unknown>;
+  cleanup: () => void;
+} {
+  const subscriptionSignal = createSubscriptionAbortSignal(parentSignal);
+  let streamError: unknown = null;
+
+  return {
+    options: {
+      signal: subscriptionSignal.signal,
+      sseMaxRetryAttempts: 1,
+      onSseError: (error) => {
+        streamError = error;
+      },
+    },
+    wrapStream: async function* (stream) {
+      try {
+        yield* stream;
+
+        if (streamError && !subscriptionSignal.signal.aborted) {
+          throw streamError;
+        }
+      } finally {
+        subscriptionSignal.cleanup();
+      }
+    },
+    cleanup: subscriptionSignal.cleanup,
+  };
+}
+
 function normalizeGlobalEvent(rawEvent: unknown, directory: string): Event | null {
   if (isEventLike(rawEvent)) {
     return rawEvent;
@@ -116,25 +172,37 @@ async function subscribeToGlobalEventStream(signal: AbortSignal): Promise<EventS
     throw new Error("Global event subscription is not available");
   }
 
-  const result = await globalEvents.event({ signal });
-  if (!result.stream) {
-    throw new Error(FATAL_NO_STREAM_ERROR);
-  }
+  const subscription = createSingleAttemptSubscription(signal);
+  try {
+    const result = await globalEvents.event(subscription.options);
+    if (!result.stream) {
+      throw new Error(FATAL_NO_STREAM_ERROR);
+    }
 
-  return { source: "global", stream: result.stream };
+    return { source: "global", stream: subscription.wrapStream(result.stream) };
+  } catch (error) {
+    subscription.cleanup();
+    throw error;
+  }
 }
 
 async function subscribeToLegacyEventStream(
   directory: string,
   signal: AbortSignal,
 ): Promise<EventStreamSubscription> {
-  const result = await opencodeClient.event.subscribe({ directory }, { signal });
+  const subscription = createSingleAttemptSubscription(signal);
+  try {
+    const result = await opencodeClient.event.subscribe({ directory }, subscription.options);
 
-  if (!result.stream) {
-    throw new Error(FATAL_NO_STREAM_ERROR);
+    if (!result.stream) {
+      throw new Error(FATAL_NO_STREAM_ERROR);
+    }
+
+    return { source: "legacy", stream: subscription.wrapStream(result.stream) };
+  } catch (error) {
+    subscription.cleanup();
+    throw error;
   }
-
-  return { source: "legacy", stream: result.stream };
 }
 
 export async function subscribeToEvents(directory: string, callback: EventCallback): Promise<void> {

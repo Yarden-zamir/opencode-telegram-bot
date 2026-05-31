@@ -115,7 +115,11 @@ describe("opencode/events", () => {
     await subscription;
 
     expect(globalEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({
+        onSseError: expect.any(Function),
+        signal: expect.any(AbortSignal),
+        sseMaxRetryAttempts: 1,
+      }),
     );
     expect(subscribeMock).not.toHaveBeenCalled();
   });
@@ -182,7 +186,11 @@ describe("opencode/events", () => {
     expect(globalEventMock).toHaveBeenCalledTimes(1);
     expect(subscribeMock).toHaveBeenCalledWith(
       { directory: "D:/repo" },
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({
+        onSseError: expect.any(Function),
+        signal: expect.any(AbortSignal),
+        sseMaxRetryAttempts: 1,
+      }),
     );
   });
 

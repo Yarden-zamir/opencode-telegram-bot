@@ -143,6 +143,36 @@ export async function reconcileSessionWithForumTopic(
   return created;
 }
 
+// Guards against `session.created` and an immediately-following `session.updated`
+// racing to create two topics for the same brand-new session.
+const topicCreationInFlight = new Set<string>();
+
+/**
+ * Ensure a forum topic exists for a session discovered from a live OpenCode
+ * event (not startup reconcile). Reuses the same reconcile path, so it only
+ * acts on root sessions whose directory matches a stored forum project context
+ * and that are not already bound to a topic.
+ */
+export async function ensureForumTopicForSession(
+  api: TopicCreateApi,
+  session: SessionListItem,
+  reason: string,
+): Promise<boolean> {
+  if (!session.id || !session.directory) {
+    return false;
+  }
+  if (getTopicBindingBySessionId(session.id) || topicCreationInFlight.has(session.id)) {
+    return false;
+  }
+
+  topicCreationInFlight.add(session.id);
+  try {
+    return await reconcileSessionWithForumTopic(api, session, reason);
+  } finally {
+    topicCreationInFlight.delete(session.id);
+  }
+}
+
 export async function reconcileStoredSessionsWithForumTopics(
   api: TopicCreateApi,
   reason: string,

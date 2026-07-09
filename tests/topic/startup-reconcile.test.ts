@@ -16,7 +16,10 @@ import {
   getTopicBindingBySessionId,
   registerTopicSessionBinding,
 } from "../../src/topic/manager.js";
-import { reconcileStoredSessionsWithForumTopics } from "../../src/topic/startup-reconcile.js";
+import {
+  ensureForumTopicForSession,
+  reconcileStoredSessionsWithForumTopics,
+} from "../../src/topic/startup-reconcile.js";
 
 const mocked = vi.hoisted(() => ({
   sessionListMock: vi.fn(),
@@ -127,5 +130,66 @@ describe("topic/startup-reconcile", () => {
     await reconcileStoredSessionsWithForumTopics(api, "test");
 
     expect(api.createForumTopic).not.toHaveBeenCalled();
+  });
+
+  describe("ensureForumTopicForSession (live events)", () => {
+    function withGeneralProject(worktree: string) {
+      const generalScopeKey = createScopeKeyFromParams({
+        chatId: -100123,
+        threadId: 1,
+        context: SCOPE_CONTEXT.GROUP_GENERAL,
+      });
+      setCurrentProject({ id: "project-1", worktree }, generalScopeKey);
+    }
+
+    it("creates a topic for a newly created session in a stored project", async () => {
+      withGeneralProject("/repo");
+      const api = {
+        createForumTopic: vi.fn().mockResolvedValueOnce({ message_thread_id: 77 }),
+      };
+
+      const created = await ensureForumTopicForSession(
+        api,
+        { id: "live-1", title: "Live One", directory: "/repo" },
+        "session.created",
+      );
+
+      expect(created).toBe(true);
+      expect(api.createForumTopic).toHaveBeenCalledTimes(1);
+      expect(api.createForumTopic).toHaveBeenCalledWith(-100123, "Live One", {
+        icon_color: 0x6fb9f0,
+      });
+      expect(getTopicBindingBySessionId("live-1")).toMatchObject({ threadId: 77 });
+    });
+
+    it("does not create a topic when no stored project matches the directory", async () => {
+      withGeneralProject("/repo");
+      const api = { createForumTopic: vi.fn() };
+
+      const created = await ensureForumTopicForSession(
+        api,
+        { id: "live-2", title: "Elsewhere", directory: "/other" },
+        "session.created",
+      );
+
+      expect(created).toBe(false);
+      expect(api.createForumTopic).not.toHaveBeenCalled();
+    });
+
+    it("creates only one topic when created and updated race for the same session", async () => {
+      withGeneralProject("/repo");
+      const api = {
+        createForumTopic: vi.fn().mockResolvedValue({ message_thread_id: 88 }),
+      };
+      const session = { id: "live-3", title: "Racing", directory: "/repo" };
+
+      const [a, b] = await Promise.all([
+        ensureForumTopicForSession(api, session, "session.created"),
+        ensureForumTopicForSession(api, session, "session.updated"),
+      ]);
+
+      expect(api.createForumTopic).toHaveBeenCalledTimes(1);
+      expect([a, b].filter(Boolean)).toHaveLength(1);
+    });
   });
 });

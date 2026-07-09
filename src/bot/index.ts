@@ -117,6 +117,7 @@ import { backgroundSessionTracker, type BackgroundSessionNotification } from "..
 import { getSessionRouteTarget, getTopicBindingBySessionId } from "../topic/manager.js";
 import { getScopeFromContext, getScopeKeyFromContext, getThreadSendOptions } from "./scope.js";
 import { syncTopicTitleForSession } from "../topic/title-sync.js";
+import { ensureForumTopicForSession } from "../topic/startup-reconcile.js";
 import { ensureGeneralTopicName } from "./middleware/general-topic-name.js";
 
 let botInstance: Bot<Context> | null = null;
@@ -1065,13 +1066,33 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
     if (event.type === "session.created" || event.type === "session.updated") {
       const info = (
-        event.properties as { info?: { id?: string; title?: string; directory?: string; time?: { updated?: number } } }
+        event.properties as {
+          info?: {
+            id?: string;
+            title?: string;
+            directory?: string;
+            parentID?: string;
+            time?: { updated?: number };
+          };
+        }
       ).info;
 
       if (info?.directory) {
         safeBackgroundTask({
           taskName: `session.cache.${event.type}`,
           task: () => ingestSessionInfoForCache(info),
+        });
+      }
+
+      // Surface newly-created sessions as forum topics live, not just at startup
+      // reconcile. Child (sub-agent) sessions carry a parentID and are skipped to
+      // match the roots-only behavior of startup reconcile.
+      if (info?.id && info.directory && !info.parentID && botInstance) {
+        const api = botInstance.api;
+        const session = { id: info.id, title: info.title ?? "", directory: info.directory };
+        safeBackgroundTask({
+          taskName: `topic.ensure.${event.type}`,
+          task: () => ensureForumTopicForSession(api, session, event.type),
         });
       }
 

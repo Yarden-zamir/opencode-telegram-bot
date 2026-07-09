@@ -59,6 +59,25 @@ function getStoredForumProjectContexts(): ForumProjectContext[] {
   return contexts;
 }
 
+/**
+ * Worktree directories of the stored forum project contexts, in order. Used to
+ * subscribe to OpenCode events at startup so sessions opened outside the bot
+ * (OpenAI proxy, opencode web/TUI) are received even before any Telegram
+ * interaction sets a current project.
+ */
+export function getStoredForumProjectWorktrees(): string[] {
+  const seen = new Set<string>();
+  const worktrees: string[] = [];
+  for (const context of getStoredForumProjectContexts()) {
+    const worktree = context.project.worktree;
+    if (worktree && !seen.has(worktree)) {
+      seen.add(worktree);
+      worktrees.push(worktree);
+    }
+  }
+  return worktrees;
+}
+
 async function listProjectSessions(project: ProjectInfo): Promise<SessionListItem[]> {
   const { data: sessions, error } = await opencodeClient.session.list({
     directory: project.worktree,

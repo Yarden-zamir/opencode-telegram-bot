@@ -117,7 +117,10 @@ import { backgroundSessionTracker, type BackgroundSessionNotification } from "..
 import { getSessionRouteTarget, getTopicBindingBySessionId } from "../topic/manager.js";
 import { getScopeFromContext, getScopeKeyFromContext, getThreadSendOptions } from "./scope.js";
 import { syncTopicTitleForSession } from "../topic/title-sync.js";
-import { ensureForumTopicForSession } from "../topic/startup-reconcile.js";
+import {
+  ensureForumTopicForSession,
+  getStoredForumProjectWorktrees,
+} from "../topic/startup-reconcile.js";
 import { ensureGeneralTopicName } from "./middleware/general-topic-name.js";
 
 let botInstance: Bot<Context> | null = null;
@@ -1147,11 +1150,16 @@ export function createBot(): Bot<Context> {
       return;
     }
 
+    // Fall back to the stored forum project directory when no current project is
+    // set (e.g. a fresh restart with no prior Telegram interaction), so the bot
+    // subscribes to events and surfaces sessions opened from the proxy or
+    // opencode web/TUI without requiring a Telegram interaction first.
     const currentProject = getCurrentProject();
-    if (config.bot.trackBackgroundSessions && currentProject?.worktree) {
-      await ensureEventSubscription(currentProject.worktree);
+    const trackDirectory = currentProject?.worktree ?? getStoredForumProjectWorktrees()[0];
+    if (config.bot.trackBackgroundSessions && trackDirectory) {
+      await ensureEventSubscription(trackDirectory);
       logger.info(
-        `[Bot] Started background session tracking after OpenCode ready: reason=${reason}, directory=${currentProject.worktree}`,
+        `[Bot] Started background session tracking after OpenCode ready: reason=${reason}, directory=${trackDirectory}`,
       );
     }
   });
